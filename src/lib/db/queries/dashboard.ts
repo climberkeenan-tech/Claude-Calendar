@@ -1,172 +1,143 @@
-import { and, asc, desc, eq, gte, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { activityLog, categories, events } from "@/lib/db/schema";
 import { dayBounds } from "@/lib/time";
+import {
+  getCalendarWindow,
+  getHabitsWeek,
+  type CalendarItem,
+} from "@/lib/db/queries/calendar";
 
-export type DashboardEvent = {
+const DAY = 24 * 60 * 60 * 1000;
+
+export type HabitWeek = {
   id: string;
   title: string;
-  kind: "event" | "task" | "habit";
-  startsAt: Date | null;
-  endsAt: Date | null;
-  dueAt: Date | null;
-  allDay: boolean;
-  location: string | null;
-  categoryName: string | null;
+  target: number;
+  doneDates: string[];
   categoryColor: string | null;
 };
 
 export type DashboardData = {
   now: Date;
-  today: DashboardEvent[];
-  deadlines: DashboardEvent[];
-  openTasks: DashboardEvent[];
-  activity: { id: string; type: string; data: Record<string, unknown> | null; createdAt: Date }[];
+  today: CalendarItem[];
+  deadlines: CalendarItem[];
+  inbox: { id: string; title: string }[];
+  habits: HabitWeek[];
+  activity: {
+    id: string;
+    type: string;
+    data: Record<string, unknown> | null;
+    createdAt: Date;
+  }[];
   categories: { id: string; name: string; color: string }[];
   monthDots: Record<string, number>;
-  current: DashboardEvent | null;
-  next: DashboardEvent | null;
-};
-
-const eventShape = {
-  id: events.id,
-  title: events.title,
-  kind: events.kind,
-  startsAt: events.startsAt,
-  endsAt: events.endsAt,
-  dueAt: events.dueAt,
-  allDay: events.allDay,
-  location: events.location,
-  categoryName: categories.name,
-  categoryColor: categories.color,
+  current: CalendarItem | null;
+  next: CalendarItem | null;
+  weekStartIso: string;
 };
 
 export async function getDashboardData(userId: string): Promise<DashboardData> {
   const now = new Date();
-  const { start, end } = dayBounds(now);
-  const horizon = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-  const monthStart = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000);
-  const monthEnd = new Date(now.getTime() + 62 * 24 * 60 * 60 * 1000);
+  const { start: dayStart, end: dayEnd, isoDay } = dayBounds(now);
+  // Monday-start week (local)
+  const dow = (new Date(`${isoDay}T12:00:00Z`).getUTCDay() + 6) % 7;
+  const weekStart = new Date(dayStart.getTime() - dow * DAY);
+  const weekEnd = new Date(weekStart.getTime() + 7 * DAY);
 
-  const [today, deadlines, openTasks, activity, cats, dotRows] =
-    await Promise.all([
-      db
-        .select(eventShape)
-        .from(events)
-        .leftJoin(categories, eq(events.categoryId, categories.id))
-        .where(
-          and(
-            eq(events.userId, userId),
-            ne(events.status, "cancelled"),
-            isNotNull(events.startsAt),
-            gte(events.startsAt, start),
-            lt(events.startsAt, end),
-          ),
-        )
-        .orderBy(asc(events.startsAt)),
-      db
-        .select(eventShape)
-        .from(events)
-        .leftJoin(categories, eq(events.categoryId, categories.id))
-        .where(
-          and(
-            eq(events.userId, userId),
-            eq(events.kind, "task"),
-            eq(events.status, "scheduled"),
-            isNotNull(events.dueAt),
-            lt(events.dueAt, horizon),
-          ),
-        )
-        .orderBy(asc(events.dueAt))
-        .limit(8),
-      db
-        .select(eventShape)
-        .from(events)
-        .leftJoin(categories, eq(events.categoryId, categories.id))
-        .where(
-          and(
-            eq(events.userId, userId),
-            eq(events.kind, "task"),
-            eq(events.status, "scheduled"),
-          ),
-        )
-        .orderBy(asc(events.dueAt))
-        .limit(10),
-      db
-        .select({
-          id: activityLog.id,
-          type: activityLog.type,
-          data: activityLog.data,
-          createdAt: activityLog.createdAt,
-        })
-        .from(activityLog)
-        .where(eq(activityLog.userId, userId))
-        .orderBy(desc(activityLog.createdAt))
-        .limit(8),
-      db
-        .select({
-          id: categories.id,
-          name: categories.name,
-          color: categories.color,
-        })
-        .from(categories)
-        .where(eq(categories.userId, userId))
-        .orderBy(asc(categories.position)),
-      db
-        .select({
-          day: sql<string>`to_char(${events.startsAt} at time zone 'America/New_York', 'YYYY-MM-DD')`,
-          n: sql<number>`count(*)::int`,
-        })
-        .from(events)
-        .where(
-          and(
-            eq(events.userId, userId),
-            ne(events.status, "cancelled"),
-            isNotNull(events.startsAt),
-            gte(events.startsAt, monthStart),
-            lt(events.startsAt, monthEnd),
-          ),
-        )
-        .groupBy(
-          sql`to_char(${events.startsAt} at time zone 'America/New_York', 'YYYY-MM-DD')`,
+  const windowStart = new Date(dayStart.getTime() - 31 * DAY);
+  const windowEnd = new Date(dayStart.getTime() + 62 * DAY);
+
+  const [windowItems, habits, inboxRows, activity, cats] = await Promise.all([
+    getCalendarWindow(userId, windowStart, windowEnd),
+    getHabitsWeek(userId, weekStart, weekEnd),
+    db
+      .select({ id: events.id, title: events.title })
+      .from(events)
+      .where(
+        and(
+          eq(events.userId, userId),
+          eq(events.kind, "task"),
+          eq(events.status, "scheduled"),
+          isNull(events.dueAt),
         ),
-    ]);
+      )
+      .orderBy(desc(events.createdAt))
+      .limit(12),
+    db
+      .select({
+        id: activityLog.id,
+        type: activityLog.type,
+        data: activityLog.data,
+        createdAt: activityLog.createdAt,
+      })
+      .from(activityLog)
+      .where(eq(activityLog.userId, userId))
+      .orderBy(desc(activityLog.createdAt))
+      .limit(8),
+    db
+      .select({ id: categories.id, name: categories.name, color: categories.color })
+      .from(categories)
+      .where(eq(categories.userId, userId))
+      .orderBy(asc(categories.position)),
+  ]);
 
-  const timed = today.filter((e) => !e.allDay && e.startsAt && e.endsAt);
+  const today = windowItems.filter((i) => {
+    if (!i.startsAt) return false;
+    return i.startsAt >= dayStart && i.startsAt < dayEnd;
+  });
+
+  const horizon = new Date(now.getTime() + 14 * DAY);
+  const deadlines = windowItems
+    .filter(
+      (i) =>
+        i.kind === "task" &&
+        !i.completed &&
+        i.dueAt &&
+        i.dueAt < horizon,
+    )
+    .sort((a, b) => a.dueAt!.getTime() - b.dueAt!.getTime())
+    .slice(0, 8);
+
+  // NOW / NEXT
+  const timed = today.filter((i) => !i.allDay && i.startsAt && i.endsAt && !i.completed);
   const current =
     timed.find(
-      (e) => e.startsAt!.getTime() <= now.getTime() && now.getTime() < e.endsAt!.getTime(),
+      (i) => i.startsAt!.getTime() <= now.getTime() && now.getTime() < i.endsAt!.getTime(),
     ) ?? null;
-  const upcomingToday = timed.find((e) => e.startsAt!.getTime() > now.getTime()) ?? null;
-  const nextDeadlineToday =
+  const upcomingToday = timed.find((i) => i.startsAt!.getTime() > now.getTime()) ?? null;
+  const dueToday =
     deadlines.find(
-      (d) => d.dueAt && d.dueAt.getTime() > now.getTime() && d.dueAt.getTime() < end.getTime(),
+      (d) => d.dueAt && d.dueAt.getTime() > now.getTime() && d.dueAt.getTime() < dayEnd.getTime(),
     ) ?? null;
-
-  // NEXT = the sooner of (next timed event today, next deadline today);
-  // if neither, the next upcoming deadline overall.
-  let next: DashboardEvent | null = upcomingToday;
-  if (
-    nextDeadlineToday &&
-    (!next || nextDeadlineToday.dueAt!.getTime() < next.startsAt!.getTime())
-  ) {
-    next = nextDeadlineToday;
+  let next: CalendarItem | null = upcomingToday;
+  if (dueToday && (!next || dueToday.dueAt!.getTime() < next.startsAt!.getTime())) {
+    next = dueToday;
   }
   if (!next) next = deadlines.find((d) => d.dueAt && d.dueAt > now) ?? null;
 
   const monthDots: Record<string, number> = {};
-  for (const row of dotRows) monthDots[row.day] = row.n;
+  for (const i of windowItems) {
+    const anchor = i.startsAt ?? i.dueAt;
+    if (!anchor) continue;
+    const iso = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+    }).format(anchor);
+    monthDots[iso] = (monthDots[iso] ?? 0) + 1;
+  }
 
   return {
     now,
     today,
     deadlines,
-    openTasks,
+    inbox: inboxRows,
+    habits,
     activity,
     categories: cats,
     monthDots,
     current,
     next,
+    weekStartIso: weekStart.toISOString(),
   };
 }
 

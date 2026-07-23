@@ -1,30 +1,70 @@
 "use client";
 
 import * as React from "react";
-import { useActionState } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { isTypingTarget } from "@/components/shortcuts/shortcuts-overlay";
-import { createEvent, type CreateEventState } from "@/server/events";
 import { CategoryDot } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { parseLocal, type ClaudeDraft, type ParsedDraft } from "@/lib/ai/quick-add";
+import { createFromDraft } from "@/server/quick-add";
 
 type Category = { id: string; name: string; color: string };
 
+/** Date → local wall-clock ISO (no timezone suffix). */
+function toLocalIso(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
+}
+
+function chipDate(d: Date): string {
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+function chipTime(d: Date): string {
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+const KIND_LABEL = { event: "Event", task: "Task", habit: "Habit" } as const;
+
+function mergeClaude(
+  text: string,
+  prev: ParsedDraft | null,
+  c: ClaudeDraft,
+): ParsedDraft {
+  const start = c.start ? new Date(c.start) : null; // wall clock ≈ browser tz
+  const due = c.due ? new Date(c.due) : null;
+  return {
+    title: c.title || prev?.title || text.trim(),
+    kind: c.kind,
+    startIso: c.kind === "task" ? null : (start?.toISOString() ?? prev?.startIso ?? null),
+    endIso:
+      c.kind !== "task" && start && c.durationMinutes
+        ? new Date(start.getTime() + c.durationMinutes * 60000).toISOString()
+        : (prev?.endIso ?? null),
+    dueIso: c.kind === "task" ? (due?.toISOString() ?? prev?.dueIso ?? null) : null,
+    allDay: c.allDay,
+    rrule: c.rrule ?? prev?.rrule ?? null,
+    rruleLabel: c.rruleLabel ?? prev?.rruleLabel ?? null,
+    categoryName: c.categoryName ?? prev?.categoryName ?? null,
+    habitTargetPerWeek: c.habitTargetPerWeek ?? prev?.habitTargetPerWeek ?? null,
+    source: "claude",
+  };
+}
+
 export function QuickAdd({ categories }: { categories: Category[] }) {
   const [open, setOpen] = React.useState(false);
-  const [kind, setKind] = React.useState<"event" | "task">("event");
-  const [categoryId, setCategoryId] = React.useState<string>("");
-  const [state, formAction, pending] = useActionState<CreateEventState, FormData>(
-    async (prev, formData) => {
-      const result = await createEvent(prev, formData);
-      if (result.ok) setOpen(false);
-      return result;
-    },
-    {},
-  );
+  const [text, setText] = React.useState("");
+  const [draft, setDraft] = React.useState<ParsedDraft | null>(null);
+  const [refining, setRefining] = React.useState(false);
+  const [refined, setRefined] = React.useState(false);
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<string | null>(null);
+  const [showDetails, setShowDetails] = React.useState(false);
+  const reqRef = React.useRef(0);
 
+  // Global shortcut
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -38,8 +78,74 @@ export function QuickAdd({ categories }: { categories: Category[] }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const today = new Date();
-  const defaultDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  // Local parse happens in the change handler — chips are instant, no effect.
+  function onTextChange(next: string) {
+    setText(next);
+    setRefined(false);
+    setDraft(next.trim() ? parseLocal(next) : null);
+  }
+
+  // Claude refinement, debounced. Stale responses are discarded.
+  React.useEffect(() => {
+    if (!text.trim() || text.trim().length < 4) return;
+    const id = ++reqRef.current;
+    const t = setTimeout(async () => {
+      setRefining(true);
+      try {
+        const res = await fetch("/api/quick-add/parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (id !== reqRef.current) return; // user kept typing
+        if (res.ok) {
+          const c = (await res.json()) as ClaudeDraft;
+          setDraft((prev) => mergeClaude(text, prev, c));
+          setRefined(true);
+        }
+      } catch {
+        /* local parse stands */
+      } finally {
+        if (id === reqRef.current) setRefining(false);
+      }
+    }, 700);
+    return () => clearTimeout(t);
+  }, [text]);
+
+  async function confirm() {
+    if (!draft || pending) return;
+    setPending(true);
+    setError(null);
+    const start = draft.startIso ? new Date(draft.startIso) : null;
+    const end = draft.endIso ? new Date(draft.endIso) : null;
+    const due = draft.dueIso ? new Date(draft.dueIso) : null;
+    const result = await createFromDraft({
+      title: draft.title,
+      kind: draft.kind,
+      startLocal: start ? toLocalIso(start) : null,
+      durationMinutes:
+        start && end ? Math.max(5, Math.round((end.getTime() - start.getTime()) / 60000)) : null,
+      dueLocal: due ? toLocalIso(due) : null,
+      allDay: draft.allDay,
+      rrule: draft.rrule,
+      categoryName: draft.categoryName,
+      habitTargetPerWeek: draft.habitTargetPerWeek,
+    });
+    setPending(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setToast(result.inbox ? "Captured to Inbox — schedule it any time." : "Added.");
+    setTimeout(() => setToast(null), 2500);
+    setText("");
+    setDraft(null);
+    setShowDetails(false);
+    setOpen(false);
+  }
+
+  const anchor = draft?.startIso ?? draft?.dueIso;
+  const anchorDate = anchor ? new Date(anchor) : null;
 
   return (
     <>
@@ -52,108 +158,224 @@ export function QuickAdd({ categories }: { categories: Category[] }) {
         ＋ Quick add
       </Button>
 
+      {toast ? (
+        <div
+          role="status"
+          className="fixed bottom-36 right-4 z-50 rounded-(--radius-sm) border border-border bg-surface px-4 py-2 text-sm text-ink shadow-raised md:bottom-24 md:right-8"
+        >
+          {toast}
+        </div>
+      ) : null}
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           title="Quick add"
-          description="Natural-language input arrives in Phase 3 — for now, the essentials."
+          description="Type it like you'd say it — “Study Biology tomorrow at 7 PM”, “Gym every Monday at 5”, “Essay due Friday”."
         >
-          <form action={formAction} className="flex flex-col gap-4">
-            <Field label="Title" htmlFor="qa-title">
-              <Input
-                id="qa-title"
-                name="title"
-                placeholder={kind === "event" ? "Study session, gym, dinner…" : "Bio homework, essay draft…"}
-                autoFocus
-                required
-                maxLength={300}
-              />
-            </Field>
+          <div className="flex flex-col gap-3">
+            <Input
+              autoFocus
+              value={text}
+              onChange={(e) => onTextChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  confirm();
+                }
+              }}
+              placeholder="What's happening?"
+              aria-label="Quick add input"
+              className="h-12 text-base"
+              maxLength={500}
+            />
 
-            <div className="flex gap-2" role="radiogroup" aria-label="Type">
-              {(["event", "task"] as const).map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  role="radio"
-                  aria-checked={kind === k}
-                  onClick={() => setKind(k)}
-                  className={cn(
-                    "flex-1 rounded-(--radius-sm) border px-3 py-2 text-sm font-medium transition-colors",
-                    kind === k
-                      ? "border-accent bg-accent-soft text-ink"
-                      : "border-border text-ink-muted hover:border-border-strong",
-                  )}
-                >
-                  {k === "event" ? "Scheduled event" : "Task with deadline"}
-                </button>
-              ))}
-            </div>
-            <input type="hidden" name="kind" value={kind} />
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Date" htmlFor="qa-date">
-                <Input id="qa-date" name="date" type="date" defaultValue={defaultDate} required />
-              </Field>
-              <Field label={kind === "event" ? "Start time" : "Due time"} htmlFor="qa-time">
-                <Input id="qa-time" name="time" type="time" />
-              </Field>
-            </div>
-
-            {kind === "event" ? (
-              <Field label="Duration (minutes)" htmlFor="qa-duration">
-                <Input
-                  id="qa-duration"
-                  name="durationMinutes"
-                  type="number"
-                  min={5}
-                  max={1440}
-                  step={5}
-                  defaultValue={60}
-                />
-              </Field>
+            {/* Instant chips from the local parse; ✦ marks Claude refinement */}
+            {draft ? (
+              <div className="flex flex-wrap items-center gap-1.5" aria-live="polite">
+                <Chip label={KIND_LABEL[draft.kind]} tone="kind" />
+                {anchorDate ? (
+                  <Chip label={chipDate(anchorDate)} />
+                ) : (
+                  <Chip label="no date → Inbox" tone="muted" />
+                )}
+                {anchorDate && !draft.allDay ? <Chip label={chipTime(anchorDate)} /> : null}
+                {draft.allDay && anchorDate ? <Chip label="all day" tone="muted" /> : null}
+                {draft.rruleLabel ? <Chip label={`↻ ${draft.rruleLabel}`} /> : null}
+                {draft.categoryName ? (
+                  <Chip
+                    label={draft.categoryName}
+                    dotColor={categories.find((c) => c.name === draft.categoryName)?.color}
+                  />
+                ) : null}
+                <span className="ml-1 text-xs text-ink-faint">
+                  {refining ? "✦ refining…" : refined ? "✦ refined" : ""}
+                </span>
+              </div>
             ) : null}
 
-            <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-ink-muted">Category</span>
-              <div className="flex flex-wrap gap-1.5">
-                {categories.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setCategoryId(categoryId === c.id ? "" : c.id)}
-                    aria-pressed={categoryId === c.id}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                      categoryId === c.id
-                        ? "border-accent bg-accent-soft text-ink"
-                        : "border-border text-ink-muted hover:border-border-strong",
-                    )}
-                  >
-                    <CategoryDot color={c.color} />
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-              <input type="hidden" name="categoryId" value={categoryId} />
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowDetails((v) => !v)}
+              className="self-start text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+            >
+              {showDetails ? "Hide details" : "Adjust details"}
+            </button>
 
-            {state.error ? (
+            {showDetails && draft ? (
+              <DetailsEditor draft={draft} setDraft={setDraft} categories={categories} />
+            ) : null}
+
+            {error ? (
               <p role="alert" className="text-sm text-danger">
-                {state.error}
+                {error}
               </p>
             ) : null}
 
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={pending}>
-                {pending ? "Adding…" : "Add"}
+              <Button onClick={confirm} disabled={!draft || pending}>
+                {pending ? "Adding…" : "Add  ⏎"}
               </Button>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function Chip({
+  label,
+  tone,
+  dotColor,
+}: {
+  label: string;
+  tone?: "kind" | "muted";
+  dotColor?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
+        tone === "kind"
+          ? "border-accent bg-accent-soft text-ink"
+          : tone === "muted"
+            ? "border-border text-ink-faint"
+            : "border-border bg-surface-raised text-ink-muted",
+      )}
+    >
+      {dotColor ? <CategoryDot color={dotColor} /> : null}
+      {label}
+    </span>
+  );
+}
+
+function DetailsEditor({
+  draft,
+  setDraft,
+  categories,
+}: {
+  draft: ParsedDraft;
+  setDraft: React.Dispatch<React.SetStateAction<ParsedDraft | null>>;
+  categories: Category[];
+}) {
+  const anchor = draft.startIso ?? draft.dueIso;
+  const d = anchor ? new Date(anchor) : null;
+  const p = (n: number) => String(n).padStart(2, "0");
+  const dateVal = d ? `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` : "";
+  const timeVal = d && !draft.allDay ? `${p(d.getHours())}:${p(d.getMinutes())}` : "";
+
+  function setAnchor(dateStr: string, timeStr: string) {
+    if (!dateStr) {
+      setDraft((v) => (v ? { ...v, startIso: null, endIso: null, dueIso: null } : v));
+      return;
+    }
+    const nd = new Date(`${dateStr}T${timeStr || "09:00"}:00`);
+    const iso = nd.toISOString();
+    setDraft((v) => {
+      if (!v) return v;
+      const dur =
+        v.startIso && v.endIso
+          ? new Date(v.endIso).getTime() - new Date(v.startIso).getTime()
+          : 60 * 60000;
+      return v.kind === "task"
+        ? { ...v, dueIso: iso, allDay: !timeStr }
+        : {
+            ...v,
+            startIso: iso,
+            endIso: new Date(nd.getTime() + dur).toISOString(),
+            allDay: !timeStr,
+          };
+    });
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-3 rounded-(--radius-sm) border border-border bg-surface-raised/50 p-3">
+      <Field label="Type" htmlFor="qa-kind">
+        <select
+          id="qa-kind"
+          value={draft.kind}
+          onChange={(e) =>
+            setDraft((v) => (v ? { ...v, kind: e.target.value as ParsedDraft["kind"] } : v))
+          }
+          className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
+        >
+          <option value="event">Event</option>
+          <option value="task">Task (deadline)</option>
+          <option value="habit">Habit</option>
+        </select>
+      </Field>
+      <Field label="Category" htmlFor="qa-cat">
+        <select
+          id="qa-cat"
+          value={draft.categoryName ?? ""}
+          onChange={(e) =>
+            setDraft((v) => (v ? { ...v, categoryName: e.target.value || null } : v))
+          }
+          className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
+        >
+          <option value="">None</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.name}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Date" htmlFor="qa-date">
+        <Input
+          id="qa-date"
+          type="date"
+          value={dateVal}
+          onChange={(e) => setAnchor(e.target.value, timeVal)}
+        />
+      </Field>
+      <Field label="Time" htmlFor="qa-time">
+        <Input
+          id="qa-time"
+          type="time"
+          value={timeVal}
+          onChange={(e) => setAnchor(dateVal, e.target.value)}
+        />
+      </Field>
+      {draft.kind === "habit" ? (
+        <Field label="Days per week" htmlFor="qa-target" className="col-span-2">
+          <Input
+            id="qa-target"
+            type="number"
+            min={1}
+            max={7}
+            value={draft.habitTargetPerWeek ?? 7}
+            onChange={(e) =>
+              setDraft((v) =>
+                v ? { ...v, habitTargetPerWeek: Number(e.target.value) || 7 } : v,
+              )
+            }
+          />
+        </Field>
+      ) : null}
+    </div>
   );
 }

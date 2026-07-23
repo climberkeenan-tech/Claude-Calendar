@@ -5,9 +5,9 @@ import { NowNext } from "@/components/dashboard/now-next";
 import { MiniMonth } from "@/components/dashboard/mini-month";
 import { QuickAdd } from "@/components/quick-add/quick-add";
 import {
-  Assignments,
   Deadlines,
   Habits,
+  InboxZone,
   ProductivityScore,
   RecentActivity,
   StudyTimer,
@@ -29,8 +29,8 @@ export default async function DashboardPage() {
         <TodaySchedule items={data.today} now={data.now} />
         <Deadlines items={data.deadlines} now={data.now} />
         <MiniMonth monthDots={data.monthDots} todayIso={isoDay} />
-        <Assignments items={data.openTasks} />
-        <Habits />
+        <Habits habits={data.habits} weekStartIso={data.weekStartIso} />
+        <InboxZone items={data.inbox} />
         <StudyTimer />
         <ProductivityScore />
         <RecentActivity items={data.activity} />

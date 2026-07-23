@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 const SHORTCUTS: { keys: string; does: string; phase?: string }[] = [
-  { keys: "Q", does: "Quick add" },
+  { keys: "Q", does: "Quick add — natural language" },
   { keys: "T", does: "Go to today (Dashboard)" },
-  { keys: "1 / 2 / 3 / 4", does: "Day · Week · Month · Agenda", phase: "Phase 3" },
-  { keys: "← / →", does: "Previous / next period", phase: "Phase 3" },
-  { keys: "Space", does: "Complete focused item", phase: "Phase 3" },
+  { keys: "1 / 2 / 3 / 4", does: "Day · Week · Month · Agenda (on Calendar)" },
+  { keys: "← / →", does: "Previous / next period (on Calendar)" },
+  { keys: "Enter", does: "Open focused event" },
   { keys: "?", does: "This overlay" },
 ];
 
