@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { auth } from "@/lib/auth";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -28,6 +29,23 @@ export default async function SettingsPage() {
         <CardBody className="flex items-center justify-between">
           <p className="text-sm text-ink-muted">Light / dark mode</p>
           <ThemeToggle initialDark={initialDark} />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Courses"
+          action={
+            <Link href="/settings/courses" className="text-xs text-accent hover:underline">
+              Manage
+            </Link>
+          }
+        />
+        <CardBody>
+          <p className="text-sm text-ink-muted">
+            Your classes — name, professor, location, color. Events and focus
+            sessions link to them.
+          </p>
         </CardBody>
       </Card>
 
