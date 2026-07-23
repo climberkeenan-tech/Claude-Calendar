@@ -1,3 +1,5 @@
+import { fromFloating } from "@/lib/tz";
+
 const DEFAULT_TZ = "America/New_York";
 
 export function fmtTime(d: Date, tz: string = DEFAULT_TZ): string {
@@ -26,26 +28,22 @@ export function fmtShortDay(d: Date, tz: string = DEFAULT_TZ): string {
   }).format(d);
 }
 
-/** Start/end of the local day (in tz) as UTC instants. */
+/** Start/end of the local day (in tz) as UTC instants — DST-exact: the "day"
+ * runs midnight-to-midnight in tz, which is 23 h or 25 h on transition days,
+ * so the end is computed from the NEXT day's midnight, never `start + 24 h`. */
 export function dayBounds(now: Date, tz: string = DEFAULT_TZ) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
+  const isoDay = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     timeZone: tz,
   }).format(now); // YYYY-MM-DD
-  const offsetAt = (iso: string) => {
-    // Find the UTC instant corresponding to local midnight by probing the offset.
-    const guess = new Date(`${iso}T00:00:00Z`);
-    const local = new Date(
-      guess.toLocaleString("en-US", { timeZone: tz }),
-    ).getTime();
-    const drift = guess.getTime() - (local - 0);
-    return new Date(`${iso}T00:00:00Z`).getTime() + drift;
-  };
-  const start = new Date(offsetAt(parts));
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { start, end, isoDay: parts };
+  const nextIso = new Date(new Date(`${isoDay}T12:00:00Z`).getTime() + 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const start = fromFloating(new Date(`${isoDay}T00:00:00Z`), tz);
+  const end = fromFloating(new Date(`${nextIso}T00:00:00Z`), tz);
+  return { start, end, isoDay };
 }
 
 /** "in 40 min" / "in 3 h 20 min" / "now" */
@@ -69,11 +67,19 @@ export function leftLabel(now: Date, end: Date): string {
 }
 
 export function relativeDue(now: Date, due: Date, tz: string = DEFAULT_TZ): string {
-  const ms = due.getTime() - now.getTime();
-  const days = Math.floor(ms / (24 * 60 * 60 * 1000));
-  if (ms < 0) return "overdue";
-  if (days === 0) return `today ${fmtTime(due, tz)}`;
-  if (days === 1) return `tomorrow ${fmtTime(due, tz)}`;
-  if (days < 7) return fmtShortDay(due, tz);
+  if (due.getTime() < now.getTime()) return "overdue";
+  // "today"/"tomorrow" are CALENDAR days in tz, not 24-hour buckets — a
+  // deadline at 8 AM tomorrow seen at 11 PM tonight must not say "today".
+  const dayIso = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(d);
+  const nowIso = dayIso(now);
+  const dueIso = dayIso(due);
+  if (dueIso === nowIso) return `today ${fmtTime(due, tz)}`;
+  const tomorrowIso = dayIso(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  const dayAfterIso = dayIso(new Date(now.getTime() + 48 * 60 * 60 * 1000));
+  // Check two candidates so a 23-hour DST day can't skip "tomorrow".
+  if (dueIso === tomorrowIso || (tomorrowIso === nowIso && dueIso === dayAfterIso)) {
+    return `tomorrow ${fmtTime(due, tz)}`;
+  }
   return fmtShortDay(due, tz);
 }

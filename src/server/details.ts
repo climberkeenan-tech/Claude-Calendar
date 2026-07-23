@@ -11,6 +11,7 @@ import {
   reminders,
 } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
+import { ownedCourseId } from "@/lib/db/ownership";
 
 const refresh = () => {
   revalidatePath("/");
@@ -102,6 +103,7 @@ export async function updateEventDetails(
   const userId = await requireUserId();
   const v = detailsSchema.parse(input);
   await assertOwned(userId, v.eventId);
+  v.courseId = await ownedCourseId(userId, v.courseId);
   await db
     .update(events)
     .set({

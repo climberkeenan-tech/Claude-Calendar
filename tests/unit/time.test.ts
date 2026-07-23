@@ -25,6 +25,31 @@ describe("dayBounds (America/New_York)", () => {
     const now = new Date("2026-03-10T01:30:00Z");
     expect(dayBounds(now).isoDay).toBe("2026-03-09");
   });
+
+  it("spring-forward day is 23 hours, fall-back day is 25", () => {
+    const spring = dayBounds(new Date("2026-03-08T15:00:00Z")); // Mar 8 EDT begins
+    expect(spring.start.toISOString()).toBe("2026-03-08T05:00:00.000Z"); // midnight EST
+    expect(spring.end.toISOString()).toBe("2026-03-09T04:00:00.000Z"); // midnight EDT
+    expect(spring.end.getTime() - spring.start.getTime()).toBe(23 * 3600_000);
+
+    const fall = dayBounds(new Date("2026-11-01T15:00:00Z")); // Nov 1 EST returns
+    expect(fall.end.getTime() - fall.start.getTime()).toBe(25 * 3600_000);
+  });
+});
+
+describe("relativeDue calendar-day labels", () => {
+  it("says tomorrow for a next-calendar-day deadline even <24h away", () => {
+    // Now: 11 PM EST Jan 15 (04:00Z Jan 16). Due: 8 AM EST Jan 16 — 9h away
+    // but a different calendar day.
+    const now = new Date("2026-01-16T04:00:00Z");
+    const due = new Date("2026-01-16T13:00:00Z");
+    expect(relativeDue(now, due)).toMatch(/^tomorrow /);
+  });
+  it("still says today for a same-day deadline", () => {
+    const now = new Date("2026-01-15T14:00:00Z"); // 9 AM EST
+    const due = new Date("2026-01-16T02:00:00Z"); // 9 PM EST same day
+    expect(relativeDue(now, due)).toMatch(/^today /);
+  });
 });
 
 describe("countdown labels", () => {

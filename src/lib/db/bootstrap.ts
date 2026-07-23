@@ -38,12 +38,25 @@ export async function ensureUser(profile: {
   if (existing.length > 0) return existing[0].id;
 
   const userId = crypto.randomUUID();
-  await db.insert(users).values({
-    id: userId,
-    email,
-    name: profile.name ?? null,
-    image: profile.image ?? null,
-  });
+  // Race-safe: two concurrent first sign-ins both reach here; the unique
+  // email constraint makes one a no-op, and both return the surviving row.
+  const inserted = await db
+    .insert(users)
+    .values({
+      id: userId,
+      email,
+      name: profile.name ?? null,
+      image: profile.image ?? null,
+    })
+    .onConflictDoNothing({ target: users.email })
+    .returning({ id: users.id });
+  if (inserted.length === 0) {
+    const winner = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email));
+    return winner[0].id;
+  }
   await db.insert(userSettings).values({
     userId,
     defaultReminders: DEFAULT_REMINDERS,

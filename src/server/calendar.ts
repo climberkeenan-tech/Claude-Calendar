@@ -8,6 +8,7 @@ import { activityLog, events, occurrences } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { untilBefore, withUntil } from "@/lib/calendar/recurrence";
 import { isoDayInTz, toFloating, fromFloating } from "@/lib/tz";
+import { ownedCategoryId } from "@/lib/db/ownership";
 
 const refresh = () => {
   revalidatePath("/");
@@ -130,6 +131,7 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
   const userId = await requireUserId();
   const v = editSchema.parse(input);
   const event = await ownedEvent(userId, v.eventId);
+  v.categoryId = await ownedCategoryId(userId, v.categoryId);
 
   if (!event.rrule || !v.occurrenceDate || v.scope === "series") {
     let startsAt = v.startsAt ?? event.startsAt;
