@@ -14,6 +14,7 @@ import {
   type EventDetails,
 } from "@/server/details";
 import { STANDARD_OFFSETS, offsetLabel } from "@/lib/reminders";
+import { AttachmentsSection } from "@/components/calendar/attachments";
 import { cn } from "@/lib/utils";
 
 type Course = { id: string; name: string };
@@ -360,10 +361,7 @@ export function EventDetailsSection({
 
       {/* Reminders */}
       <div className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-ink-muted">
-          Reminders{" "}
-          <span className="font-normal text-ink-faint">(delivery goes live in Phase 5)</span>
-        </span>
+        <span className="text-xs font-medium text-ink-muted">Reminders</span>
         <div className="flex flex-wrap gap-1.5">
           {STANDARD_OFFSETS.map((o) => {
             const on = details.reminderOffsets.includes(o.minutes);
@@ -385,6 +383,9 @@ export function EventDetailsSection({
           })}
         </div>
       </div>
+
+      {/* Attachments */}
+      <AttachmentsSection eventId={eventId} />
     </div>
   );
 }

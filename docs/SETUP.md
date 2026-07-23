@@ -32,7 +32,20 @@ The code is production-ready; these are the accounts only you can create. Do the
 
 3. Deploy. Note your URL (`https://YOUR-PROJECT.vercel.app`) and add it to the Google redirect URIs (step 2.4) if you hadn't.
 
-## 4. Create the database tables — ~2 min
+## 4. Reminders, AI, and file storage — ~7 min
+
+These power push/email reminders (Phase 5), the AI assistant (Phase 6), and syllabus import + attachments (Phase 7). Add each value in Vercel → your project → **Settings → Environment Variables**, then redeploy once at the end.
+
+1. **Upstash QStash** (the reminder alarm clock): [console.upstash.com](https://console.upstash.com) → QStash → copy three values → `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`. Free tier is plenty.
+2. **Resend** (reminder emails): [resend.com](https://resend.com) → API Keys → create one → `RESEND_API_KEY`.
+3. **Web push keys**: run `npx web-push generate-vapid-keys` in any terminal. Public key goes in **both** `VAPID_PUBLIC_KEY` and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`; private key in `VAPID_PRIVATE_KEY`.
+4. **Cron secret**: any long random string → `CRON_SECRET` (protects the nightly maintenance route).
+5. **Claude API key** (quick-add parsing, daily digest, syllabus extraction): [console.anthropic.com](https://console.anthropic.com) → API Keys → `ANTHROPIC_API_KEY`. This is the one paid piece — a semester of normal use is a few dollars.
+6. **Blob store** (private file storage for syllabi + attachments): in Vercel, open your project → **Storage → Create Database → Blob** → create. Vercel adds `BLOB_READ_WRITE_TOKEN` to the project automatically.
+
+Then **Deployments → ⋯ → Redeploy** so the new variables take effect.
+
+## 5. Create the database tables — ~2 min
 
 On your computer (or any terminal with the repo):
 
@@ -43,10 +56,10 @@ DATABASE_URL="<your Neon connection string>" npm run db:migrate
 
 This applies the checked-in SQL migration (the same one verified against Postgres 16 in CI/dev).
 
-## 5. Sign in
+## 6. Sign in
 
 Open your Vercel URL → **Continue with Google**. First sign-in automatically creates your account, settings, and the six default categories. Any other Google account is refused.
 
 ---
 
-**Costs after setup:** $0/month for everything above. The Claude API key (Phase 3+) is the only paid piece, added later as `ANTHROPIC_API_KEY`.
+**Costs after setup:** $0/month for everything except the Claude API key (`ANTHROPIC_API_KEY`), which is pay-per-use — typically a few dollars per semester.
