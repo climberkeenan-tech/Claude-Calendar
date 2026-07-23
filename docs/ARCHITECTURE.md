@@ -19,8 +19,8 @@ One Next.js application deployed on Vercel. Postgres (Neon) holds everything. Au
 | App framework | **Next.js 15, App Router, TypeScript** | Separate SPA + API server — two deploys, two codebases, no benefit for one user |
 | Database | **Neon Postgres + Drizzle ORM** | SQLite — no good story for a serverless host + multi-device access; Supabase — brings a second auth/storage system we don't need |
 | Auth | **Auth.js v5, Google provider, email allowlist** | Passwords/magic links — more code, worse UX than one Google tap |
-| Recurrence | **RFC 5545 RRULEs stored on the event, expanded at query time** (`rrule` library) | Materializing every occurrence as rows — write amplification, edit/rescheduling nightmares |
-| Reminder timing | **`notification_jobs` table as source of truth + QStash scheduled callback per job; daily cron as sweep/safety net** | Vercel Cron alone — Hobby tier crons run at most daily, useless for "15 minutes before class"; a persistent worker server — a second deployment to babysit |
+| Recurrence | **RFC 5545 RRULEs stored on the event, expanded at query time** (`rrule` library, floating-time convention — see §4) | Materializing every occurrence as rows — write amplification, edit/rescheduling nightmares |
+| Reminder timing | **`notification_jobs` table as source of truth; QStash callbacks enqueued only for jobs due ≤ 48 h out (QStash free tier caps delay at 7 days); daily cron tops up the enqueue window and sweeps** | Vercel Cron alone — Hobby tier crons run at most daily, useless for "15 minutes before class"; a persistent worker server — a second deployment to babysit |
 | AI model | **`claude-opus-4-8` for all AI features** (Anthropic-recommended default) | Smaller models for cost — cost at single-user volume is negligible; can revisit per-feature if quick-add latency bothers in practice (decision point flagged in Phase 3) |
 | AI output format | **Structured outputs (`client.messages.parse` + Zod schemas)** | Free-text JSON prompting — parse failures become user-facing bugs |
 | "Accessible from Claude" | **MCP server route inside the app** (Streamable HTTP, bearer token) | Building a chat UI inside the app — duplicates what claude.ai already does better |
@@ -40,14 +40,14 @@ One Next.js application deployed on Vercel. Postgres (Neon) holds everything. Au
 | Animation | CSS transitions for most things; `motion` for drag/reorder and view transitions | Animation is seasoning, not sauce |
 | Database | Neon Postgres (serverless driver) | Free tier: 0.5 GB storage — years of headroom for one user |
 | ORM | Drizzle ORM + `drizzle-kit` migrations | Schema lives in TypeScript; migrations are plain SQL files checked into the repo |
-| Auth | Auth.js v5 (NextAuth), Google OAuth, JWT session strategy | No database adapter needed; allowlist check in the `signIn` callback |
+| Auth | Auth.js v5 (NextAuth), Google OAuth, JWT session strategy | No database adapter needed; allowlist check in the `signIn` callback. Note: v5 is a pinned beta in maintenance mode (see §14) — kept because the alternative (Better Auth) requires a DB adapter we otherwise don't need |
 | AI | `@anthropic-ai/sdk`, model `claude-opus-4-8` | Structured outputs via `zodOutputFormat`; PDFs/images sent directly as content blocks |
-| File storage | Vercel Blob | Syllabus uploads + event attachments |
+| File storage | Vercel Blob (**private store**) | Syllabus uploads + event attachments; served through authenticated routes / signed URLs, never public-by-obscurity links |
 | Email | Resend | Free tier 100/day |
 | Push | Web Push (VAPID) via `web-push` + a service worker | Works on desktop browsers and Android; iOS requires the PWA installed to the home screen (iOS 16.4+) — email is the fallback channel |
 | SMS | Twilio (Phase 5, optional — costs real money) | Channel abstraction means adding it later touches one file |
-| Scheduled delivery | Upstash QStash (signed HTTP callbacks at a scheduled time) | Free tier 500 messages/day; a heavy day needs ~30 |
-| Dates | `date-fns` + `date-fns-tz`; `rrule` for recurrence | All storage in UTC; display timezone `America/New_York` (configurable in settings) |
+| Scheduled delivery | Upstash QStash (signed HTTP callbacks at a scheduled time) | Free tier 1,000 messages/day, **max scheduled delay 7 days** — hence the ≤ 48 h enqueue window in §7. Sizing note: one event with 3 offsets × 2 channels = 6 jobs, so a heavy day is realistically 50–100 jobs — still comfortable |
+| Dates | `date-fns` + `date-fns-tz`; `rrule` for recurrence | All storage in UTC; display timezone `America/New_York` (configurable). `rrule`'s native `TZID` handling is known-buggy around DST, so we use the floating-time convention (§4) and convert at the boundary with `date-fns-tz` |
 | NL date fallback | `chrono-node` | Offline fallback if the Claude API is unreachable during quick add |
 | DOCX extraction | `mammoth` (DOCX → text) | PDFs and images go to Claude natively; DOCX needs one conversion step |
 | Charts | Recharts | Phase 8 |
@@ -150,7 +150,7 @@ Single Postgres database. All timestamps `timestamptz` (UTC). Every table carrie
 | Column | Notes |
 |---|---|
 | id, user_id, title, description, notes | |
-| kind | `'event'` (time-blocked) · `'task'` (deadline-driven: assignments, homework) · `'habit'` (recurring, streak-tracked) |
+| kind | `'event'` (time-blocked) · `'task'` (deadline-driven: assignments, homework) · `'habit'` (recurring, tracked against a **weekly target**, e.g. "gym 3 of 7 days" — deliberately *not* consecutive-day streaks; one missed day never zeroes anything, and completions can be backfilled after the fact) |
 | category_id, course_id, location | course nullable |
 | starts_at, ends_at, all_day | for `event`/`habit`; nullable for pure tasks |
 | due_at | for `task`; the deadline shown in Upcoming Deadlines |
@@ -161,7 +161,7 @@ Single Postgres database. All timestamps `timestamptz` (UTC). Every table carrie
 | status, completed_at | `scheduled · completed · cancelled` |
 | source, source_id | `manual · quick_add · syllabus · ai_suggestion · integration` — every AI-created row is traceable and bulk-undoable |
 
-**`occurrences`** — per-instance state for recurring events. Row exists only when an instance deviates from the series: (event_id, occurrence_date) PK, cancelled flag, completed flag + completed_at (this is also how habit streaks are computed), overrides (jsonb patch: moved time, changed location, etc.).
+**`occurrences`** — per-instance state for recurring events. Row exists only when an instance deviates from the series: (event_id, occurrence_date) PK, cancelled flag, completed flag + completed_at (habit weekly-target adherence is computed from these rows), overrides (jsonb patch: moved time, changed location, etc.).
 
 ### Event sub-resources
 
@@ -178,9 +178,9 @@ Single Postgres database. All timestamps `timestamptz` (UTC). Every table carrie
 
 - **`focus_sessions`** — event_id?, course_id?, started_at, ended_at, duration_minutes, kind (`study · work · reading · other`). Fed by the dashboard Study Timer.
 - **`activity_log`** — append-only: type, entity_type, entity_id, data (jsonb), created_at. Powers "Recent Activity" and gives the AI honest behavioral data (created-then-postponed-3-times is a procrastination signal).
-- **`daily_stats`** — date PK + rolled-up columns: minutes_studied, minutes_by_category (jsonb), tasks_completed, tasks_completed_late, tasks_overdue, focus_session_count, productivity_score. Recomputed nightly; charts read this, never raw tables.
+- **`daily_stats`** — date PK + rolled-up columns: minutes_studied, minutes_by_category (jsonb), free_minutes, avg_work_session_minutes, tasks_completed, tasks_completed_late, tasks_overdue, focus_session_count, productivity_score. Recomputed nightly; charts read this, never raw tables.
 - **`user_patterns`** (one row, jsonb) — nightly-derived: estimate-accuracy ratio per course, completion-rate-by-hour histogram, reminder ignore rates, typical busy windows. Injected into AI prompts — the "gets smarter over time" mechanism is structured data, not model fine-tuning.
-- **`ai_insights`** — kind (`study_suggestion · conflict · procrastination · busy_week_warning · schedule_improvement · time_estimate`), title, body, confidence, action (jsonb — a machine-applicable payload naming a server action + args, enabling one-click accept), status (`new · accepted · dismissed`), created_at, expires_at.
+- **`ai_insights`** — kind (`study_suggestion · conflict · starter_block_suggestion · busy_week_warning · schedule_improvement · time_estimate`), title, body, confidence, action (jsonb — **a Zod-validated union of a small whitelisted operation set**: `create_event`, `reschedule_item`, `add_reminder` — never an open "call any server action by name" dispatch), status (`new · accepted · dismissed`), created_at, expires_at. Procrastination detection exists as an *internal signal* that produces action-framed suggestions ("BIO essay keeps slipping — want a 25-minute starter block at 4?"), never as a user-facing label.
 
 ### Import & access
 
@@ -189,10 +189,10 @@ Single Postgres database. All timestamps `timestamptz` (UTC). Every table carrie
 
 ### Recurrence model (how repeat rules actually work)
 
-1. A recurring event is **one row** with an `rrule` (`FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261211T000000Z`).
-2. Any calendar query expands rules **server-side within the visible window** using the `rrule` library — pure function, heavily unit-tested, including DST boundaries (America/New_York has two per year).
-3. "Edit this occurrence" writes an `occurrences` override row; "edit whole series" edits the parent; "this and future" splits the series (old row gets `UNTIL`, new row starts at the split). These are the only three edit modes — matching what every mainstream calendar trains users to expect.
-4. Reminder jobs for recurring events are materialized on a **60-day rolling horizon** by the nightly cron, so QStash never needs to know about infinity.
+1. A recurring event is **one row** with an `rrule` (e.g. `FREQ=WEEKLY;BYDAY=MO,WE` + an `UNTIL` at the last occurrence's instant).
+2. Any calendar query expands rules **server-side within the visible window** using the `rrule` library. Because `rrule`'s native `TZID` support is known-buggy around DST, expansion uses the **floating-time convention**: wall-clock values go in as fake-UTC, come out as wall-clock, and are converted to real instants at the boundary with `date-fns-tz`. All of it is a pure function, heavily unit-tested, including DST boundaries (America/New_York has two per year).
+3. "Edit this occurrence" writes an `occurrences` override row; "edit whole series" edits the parent; "this and future" splits the series (old row gets `UNTIL`, new row starts at the split). These are the only three edit modes — matching what every mainstream calendar trains users to expect. `UNTIL` is always stored as the instant of the final occurrence to keep — never bare UTC midnight, which silently drops the last day for any US-timezone event.
+4. Reminder jobs for recurring events are materialized into `notification_jobs` on a **60-day rolling horizon** by the nightly cron, but handed to QStash only when due within **48 hours** (QStash's free tier caps scheduled delay at 7 days; the database is the long-horizon store, QStash is just the short-fuse alarm clock).
 
 ---
 
@@ -201,7 +201,7 @@ Single Postgres database. All timestamps `timestamptz` (UTC). Every table carrie
 - **Auth.js v5** with the Google provider only. The `signIn` callback rejects any email not in the `ALLOWED_EMAILS` env var. One tap to sign in, nothing to remember, and the app is private even though it's on the public internet.
 - **JWT session strategy** — no session table, no DB adapter; fewer moving parts.
 - Middleware protects everything under `(app)/` and `/api/*` except: the auth routes, `/api/notifications/deliver` (QStash signature verification instead), `/api/cron/*` (Vercel cron secret header), and `/api/mcp` (bearer token, below).
-- **MCP access tokens**: generated in Settings, stored hashed in `api_tokens`, sent as `Authorization: Bearer` by Claude clients. Revocable individually. This keeps human auth (Google) and machine auth (tokens) cleanly separated.
+- **MCP access tokens**: generated in Settings, stored hashed in `api_tokens`, sent as `Authorization: Bearer`. Revocable individually. This keeps human auth (Google) and machine auth (tokens) cleanly separated. **Reality check on clients:** static bearer headers work for Claude Code (and any header-capable MCP client), but claude.ai and Claude Desktop custom connectors support only OAuth or no-auth — so full claude.ai/Desktop connectivity requires implementing MCP OAuth (OAuth 2.1 + dynamic client registration; `mcp-handler` ships an experimental auth wrapper). Plan: bearer-token MCP v1 for Claude Code first, MCP OAuth as a scheduled later deliverable (see ROADMAP Phases 6 and 11).
 
 ---
 
@@ -210,7 +210,7 @@ Single Postgres database. All timestamps `timestamptz` (UTC). Every table carrie
 - **Views**: Day, Week (default), Month, Agenda. One shared data hook (`useCalendarWindow(start, end)`) feeds all four; a server query returns expanded occurrences + tasks-due + habits in the window in a single round trip.
 - **Rendering**: CSS-grid time grid. Events are absolutely positioned chips; overlap resolution (side-by-side columns) is a pure function with unit tests.
 - **Drag & drop**: move (drag), resize (drag edges), and drag-from-task-list-to-calendar (turns a deadline task into a scheduled work block — Phase 9's manual precursor). Server action commits on drop; optimistic UI with rollback on failure. 15-minute snap.
-- **Quick Add (the flagship interaction)**: `Q` anywhere (or the always-visible ＋ button) opens a single text field. Input goes to `claude-opus-4-8` with a strict Zod schema → `{title, kind, start, end, rrule?, category_guess, course_guess, confidence}`. The parsed result renders as **editable chips** (date, time, category) in the same box — one Enter to confirm. Sub-second perceived latency via optimistic chip rendering; if the API is unreachable, `chrono-node` parses dates offline and the user picks the category manually. Nothing is ever created without the confirm step, so a wrong parse costs one click, not a wrong calendar entry.
+- **Quick Add (the flagship interaction)**: `Q` anywhere (or the always-visible ＋ button) opens a single text field. **Parsing is local-first**: `chrono-node` runs on every keystroke, so date/time chips render *instantly* as you type. In parallel, the text goes to Claude with a strict Zod schema → `{title, kind, start, end, rrule?, category_guess, course_guess, confidence}`, which reconciles and enriches the chips when it returns (recurrence like "every Monday", category and course guesses — things chrono can't do). One Enter confirms. Hard latency gate in Phase 3: p95 keystroke-to-chips < 1.5 s regardless of API state; if the API is unreachable, the local parse alone is fully usable. **Input with no parseable date isn't rejected or interrogated — it lands in the Inbox** (a `task` with `due_at = null`) with a one-tap "schedule it" path later, so capturing a stray thought never forces a scheduling decision. **Deliberate deviation from the brief** (which says quick add "automatically creates events"): nothing is created without the one-Enter confirm, because a wrong parse should cost one keypress, not a wrong calendar entry — flagged for approval at the Phase 3 gate.
 - **Timezone policy**: store UTC, display in the user's timezone setting, expand RRULEs in the event's own `tz`. The one rule that prevents an entire class of bugs.
 
 ---
@@ -218,22 +218,24 @@ Single Postgres database. All timestamps `timestamptz` (UTC). Every table carrie
 ## 7. Notification system
 
 ```
-reminders (intent)  →  notification_jobs (materialized, send_at)  →  QStash schedule
-                                                                        │ signed callback at send_at
-                                                                        ▼
-                                                        /api/notifications/deliver
-                                                                        │ re-check: still pending? event still exists,
-                                                                        │ not completed, not rescheduled? quiet hours?
-                                                                        ▼
-                                                     channel dispatch: in-app · push · email · (sms)
+reminders (intent) → notification_jobs (materialized ≤60 days out; DB = source of truth)
+                          │ nightly cron + scheduler enqueue to QStash ONLY jobs due ≤ 48 h
+                          ▼
+                     QStash schedule ──signed callback at send_at──▶ /api/notifications/deliver
+                          re-check: still due? event exists, not completed/rescheduled? quiet hours?
+                          lease (pending → sending) → channel dispatch → sent on provider accept
+                                   in-app · push · email · (sms)
 ```
 
-- **Source of truth is the database.** When an event is created/edited, `scheduler.ts` diffs the desired job set against existing rows: creates new jobs (+ QStash schedule per job), cancels stale ones (delete QStash message, mark row `cancelled`). Rescheduling an event automatically moves its reminders — no orphaned notifications.
-- **Delivery is idempotent.** The callback transitions `pending → sent` atomically; a duplicate or late QStash delivery finds a non-pending row and no-ops. The event's current state is re-checked at delivery time, so a completed assignment never nags.
-- **Safety net**: the daily Vercel cron sweeps for `pending` jobs whose `send_at` slipped past (QStash outage, deploy race) and delivers or re-schedules them. Vercel Hobby crons are daily-only — which is exactly why per-minute precision lives in QStash, not cron.
-- **Channels** implement one interface (`send(job, event) → ok/fail`): **in-app** (notification bell + toast), **web push** (VAPID; desktop + Android; iOS via installed PWA), **email** (Resend), **SMS** (Twilio — Phase 5 decision, since it's the only channel that costs money per message; the interface exists from day one).
-- **Acknowledgment**: tapping/clicking a notification (or completing the item) marks the job `acknowledged`. Unacknowledged + still-incomplete is the signal for…
-- **Escalation (Phase 5/6)**: if the last N reminders for an item were ignored and the deadline is inside the danger window, the escalation policy inserts extra jobs at tighter intervals and promotes channel urgency (in-app → push → email). Hard caps + quiet-hours respect so it motivates rather than harasses. All escalation jobs are flagged, so the AI can later learn which escalations actually worked.
+- **Source of truth is the database; QStash is only the alarm clock.** When an event is created/edited, `scheduler.ts` diffs the desired job set against existing rows: creates/cancels `notification_jobs`, and enqueues to QStash immediately only if `send_at` is within 48 hours (QStash free tier caps scheduled delay at 7 days — the nightly cron tops up the enqueue window). Cancelling deletes the QStash message and marks the row `cancelled`. Rescheduling an event automatically moves its reminders — no orphaned notifications.
+- **Delivery is crash-safe and idempotent.** The callback takes a lease (`pending → sending` with `lease_expires_at`), dispatches to the channel, and marks `sent` only after the provider accepts — using provider idempotency keys (e.g. Resend's `Idempotency-Key`) so a retry can't double-send. A duplicate/late QStash delivery finds a non-pending row and no-ops; a crash mid-send leaves an expired lease the sweep reclaims and retries. The event's current state is re-checked at delivery time, so a completed assignment never nags.
+- **Quiet hours defer, never drop**: a job landing inside quiet hours is marked deferred and re-enqueued for quiet-hours end.
+- **Safety net**: the daily Vercel cron sweeps for `pending` jobs past `send_at` and expired `sending` leases (QStash outage, deploy race, mid-send crash) and re-delivers. Vercel Hobby crons are daily-only — which is exactly why per-minute precision lives in QStash, not cron.
+- **Channels** implement one interface (`send(job, event) → ok/fail`): **in-app** (notification bell + toast), **web push** (VAPID; desktop + Android; iOS via installed PWA), **email** (Resend), **SMS** (Twilio — Phase 5 decision; the interface exists from day one, and the decision is framed as a *reliability* question, not just cost, since SMS is the one channel that doesn't depend on a PWA being installed).
+- **Cross-channel fallback**: a deadline-critical push left unacknowledged for N minutes automatically falls back to email. Reliability on the phone is the product; a single flaky channel must never be a single point of failure.
+- **Anti-fatigue by design**: category defaults attach at most 1–2 reminders per event (the full 8-offset menu exists, but as a menu, not a default); every notification surface carries **snooze** ("again in 30 min · tonight · tomorrow") and a one-tap **"too much — back off"** control that thins future defaults for that category. Ignored notifications train blanket ignoring — the system's job is to stay trustworthy, not loud.
+- **Acknowledgment**: tapping/clicking a notification (or completing the item) marks the job `acknowledged`. Unacknowledged + still-incomplete is the input signal for escalation.
+- **Escalation (built in Phase 6, once real ignore-rate data exists)**: if the last N reminders for an item were ignored and the deadline is inside the danger window, the policy inserts extra jobs at tighter intervals and promotes channel urgency (in-app → push → email). Hard caps + quiet-hours respect so it motivates rather than harasses. Escalation jobs are flagged, so the system can learn which escalations actually worked.
 
 ---
 
@@ -241,7 +243,7 @@ reminders (intent)  →  notification_jobs (materialized, send_at)  →  QStash 
 
 - **Write path**: normal app usage populates `events`, `occurrences`, `focus_sessions`, `activity_log`. No separate tracking calls to forget.
 - **Nightly rollup** (daily cron): computes yesterday's `daily_stats` row and refreshes `user_patterns`. Charts always read pre-aggregated data — the analytics page stays instant no matter how much history accumulates.
-- **Productivity score** (0–100, shown on the dashboard): weighted blend of on-time completion rate (40%), focus minutes vs. personal target (25%), habit adherence (20%), and overdue pressure (15%, inverse). The formula lives in one documented, unit-tested function — the score must be **explainable in the UI** ("87 — strong: everything on time, light on study minutes"), never a mystery number, or it becomes anxiety fuel instead of feedback.
+- **Productivity score** (0–100): weighted blend of on-time completion rate (40%), focus minutes vs. personal target (25%), habit adherence (20%), and overdue pressure (15%, inverse) — with guardrails so it stays feedback rather than shame-ware: it is computed **weekly**, not as a daily judgment; any component with no underlying data drops out and the weights renormalize (an unused timer is a tracking gap, not a productivity failure); the dashboard tile is **hideable**, and its default presentation is a short "wins + one next action" summary ("everything on time — want a study block tomorrow?") with the number available on tap. The formula lives in one documented, unit-tested function and is always explainable in the UI, framed as next actions, never deficits.
 - **Phase 8 charts** (Recharts): weekly timeline, category pie, workload-by-course bars, most/least productive day heatmap, trend lines, semester progress bar. Sleep/exercise tracking enters as `habit` events + focus-session kinds rather than a parallel tracking subsystem.
 
 ---
@@ -254,7 +256,7 @@ Three pipelines:
 
 1. **Quick-add parsing** (interactive, §6). Single structured-output call; strict schema; `chrono-node` offline fallback. Cost ≈ half a cent per parse.
 2. **Syllabus extraction** (§11). One document-in, structured-JSON-out call per upload.
-3. **Insights engine** (background). The daily cron composes a compact context — next 14 days of events, open tasks, `daily_stats` trends, `user_patterns` — and asks for prioritized suggestions against a fixed taxonomy (study-time suggestions, busy-week predictions, break recommendations, procrastination flags, conflicts, schedule improvements, estimate corrections). Results land in `ai_insights`, each carrying an `action` payload (server action + args) so the dashboard renders **one-click Accept**. Insights expire; stale advice self-deletes. Volume control: suggestions are capped per day — an assistant that nags gets ignored, which defeats every other feature.
+3. **Insights engine** (background). The daily cron composes a compact context — next 14 days of events, open tasks, `daily_stats` trends, `user_patterns` — and asks for prioritized suggestions against a fixed taxonomy (study-time suggestions, busy-week predictions, break recommendations, starter-block suggestions for slipping tasks, conflicts, schedule improvements, estimate corrections). **Every insight leads with its one-click action** — the framing is always "here's a move" ("BIO essay keeps slipping — want a 25-minute starter block at 4?"), never a diagnosis; procrastination/ignore-rate vocabulary stays internal. Results land in `ai_insights` with a whitelisted `action` payload so the dashboard renders **one-click Accept**. Volume control: **at most 3 insights per day, delivered as one digest**, and they expire — an assistant that nags gets ignored, which defeats every other feature.
 
 **How it "gets smarter":** `user_patterns` is recomputed nightly from real behavior (estimate accuracy per course, productive hours, ignore rates) and injected into every prompt. Learning is transparent, inspectable data — not hidden model state.
 
@@ -279,7 +281,8 @@ Tokens defined once in `src/styles/tokens.css`, consumed via Tailwind theme:
 - **Shape**: 12–16 px radii, soft low shadows, whitespace over dividers.
 - **Category palette** (muted, warm, distinguishable): Class `#6A9BCC` · Homework `#D97757` · Exam `#BF4D43` · Personal `#7D9B76` · Work `#C2A87D` · Practice `#A187BE`. Custom colors allowed.
 - **Motion**: 150–200 ms ease-out on everything interactive; drag physics via `motion`; `prefers-reduced-motion` honored globally.
-- **Keyboard**: `Q` quick add · `T` today · `1/2/3/4` day/week/month/agenda · `←/→` navigate period · `⌘K` command palette · `Space` complete focused item · `?` shortcut overlay.
+- **Dashboard hierarchy (the 5-second answer)**: the only above-the-fold hero is a **NOW / NEXT band** — the current block with time remaining, and the next thing with a live countdown ("Bio lab · in 40 min") — because "time until next thing" is the single best aid for time blindness. Everything else the brief lists (schedule, deadlines, assignments, habits, timer, calendar preview, score, recent activity) is present but secondary: compact cards below the fold or collapsed, never competing with the answer to "what should I be doing right now?"
+- **Keyboard**: `Q` quick add — the one omnibox (no separate ⌘K palette; two summonable text boxes with overlapping jobs is one too many) · `T` today · `1/2/3/4` day/week/month/agenda · `←/→` navigate period · `Space` complete focused item · `?` shortcut overlay.
 - **Accessibility**: Radix primitives, visible focus rings, WCAG AA contrast verified for both themes (including event-chip text over category colors), full keyboard reachability.
 
 ---
@@ -309,11 +312,11 @@ The `source_excerpt` field (the text span the item came from) makes review trust
 
 ## 12. Accessible directly from Claude — the MCP server
 
-`/api/mcp` implements MCP over Streamable HTTP (official TypeScript SDK + `mcp-handler` adapter), authenticated by bearer token (§5). Add it once as a custom connector in claude.ai / Claude Desktop / Claude Code, then:
+`/api/mcp` implements MCP over Streamable HTTP (official TypeScript SDK + `mcp-handler` adapter). Auth is staged to match what Claude clients actually support (§5): **v1 = bearer token → Claude Code** (which supports custom headers) ships first; **claude.ai and Claude Desktop custom connectors require MCP OAuth** (they have no static-header field), which is a scheduled follow-up deliverable. Once connected:
 
 > "What's my day look like?" · "Add gym every Monday at 5" · "Mark the bio homework done" · "When am I free Thursday afternoon?" · "How was my week?"
 
-Initial tool surface (each ≤ ~1 s, JSON-out, wrapping the same server actions as the UI):
+Initial tool surface (fast, JSON-out, wrapping the same server actions as the UI — expect occasional extra latency from Neon free-tier cold starts after idle):
 
 | Tool | Purpose |
 |---|---|
@@ -339,7 +342,9 @@ This is the highest-leverage "feels like a Claude product" feature: the calendar
 | Preview | Vercel preview per PR/branch push | Neon branch per preview |
 | Production | Vercel, `main` branch | Neon main |
 
-**Pipeline**: push → GitHub Actions (typecheck, lint, unit tests, build) → Vercel deploy. Drizzle migrations run via a release step (`drizzle-kit migrate`) before traffic hits new code. Rollback = redeploy previous Vercel build (schema changes stay additive between phases to keep rollback safe).
+**Pipeline**: push → GitHub Actions (typecheck, lint, unit tests, build) → Vercel deploy. **Migration policy: expand/contract (additive-only) schema changes** — Vercel has no release phase that guarantees migrations land before new code serves traffic, so instead of fighting for ordering, every migration must be safe to apply before *or* after the code deploy; destructive contractions wait a full release. `drizzle-kit migrate` runs from the Actions job. Rollback = redeploy previous Vercel build (safe under the same additive rule).
+
+**Nightly background work** (sweep, rollups, `user_patterns`, insights, QStash top-up) is **not one monolithic cron function** — the daily cron kicks off idempotent stages fanned out through QStash self-invocations, each with `maxDuration` pinned, because a single function doing everything (including a Claude call that can run minutes) courts Vercel's function time ceiling. Hobby cron also fires at an arbitrary minute within the scheduled hour — nothing time-precise is allowed to depend on it.
 
 **Environment variables** (`.env.example` checked in): `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID/SECRET`, `ALLOWED_EMAILS`, `ANTHROPIC_API_KEY`, `QSTASH_TOKEN` + signing keys, `RESEND_API_KEY`, `VAPID_PUBLIC/PRIVATE_KEY`, `BLOB_READ_WRITE_TOKEN`, `CRON_SECRET`, (later: `TWILIO_*`).
 
@@ -349,7 +354,7 @@ This is the highest-leverage "feels like a Claude product" feature: the calendar
 |---|---|---|
 | Vercel (hosting, blob, daily cron) | Hobby | $0 |
 | Neon Postgres | Free | $0 |
-| Upstash QStash | Free (500 msg/day) | $0 |
+| Upstash QStash | Free (1,000 msg/day) | $0 |
 | Resend | Free (100 email/day) | $0 |
 | Web Push | — | $0 |
 | Anthropic API | usage | ~$3–8 |
@@ -369,5 +374,7 @@ This is the highest-leverage "feels like a Claude product" feature: the calendar
 | Recurrence edge cases (DST, "this and future") | All recurrence logic in one pure module with a serious unit-test suite before Phase 3 ships |
 | AI parse errors polluting the calendar | Confirm-before-create everywhere; `source` tagging + bulk undo per import |
 | Vercel Hobby cron is daily-only | Precise timing delegated to QStash by design; cron only does sweeps/rollups |
-| Reminder spam eroding trust | Delivery-time re-checks, quiet hours, escalation caps, per-category defaults |
+| Reminder spam eroding trust | 1–2 default reminders per event, snooze + back-off controls, delivery-time re-checks, quiet hours, escalation caps |
+| Auth.js v5 is a beta in maintenance mode (stewardship moved to Better Auth) | Pin the exact beta version; it works today on Next.js 15 with JWT + Google, and the alternative (Better Auth) forces a DB adapter we otherwise don't need. Revisit only if a security fix stalls |
+| Neon free tier autosuspends after ~5 min idle → cold-start latency on first query | Acceptable for a personal app; UX absorbs it (local-first quick add, optimistic UI); latency targets stated as steady-state |
 | Scope creep across 12 phases | This document + ROADMAP.md are the contract; each phase ends with verification and an explicit go/no-go |

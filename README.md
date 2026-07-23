@@ -7,7 +7,7 @@ A personal productivity system for organizing academic and personal life at High
 ## What this will be
 
 - A **calendar + task system** with day/week/month/agenda views, drag-and-drop, recurring events, and color categories.
-- A **natural-language quick add** — type "Study Biology tomorrow at 7 PM" and the event exists.
+- A **natural-language quick add** — type "Study Biology tomorrow at 7 PM", watch the parsed chips appear as you type, press Enter once, and the event exists.
 - A **syllabus importer** — upload a PDF/image/DOCX syllabus, review what Claude extracted, approve, and the whole semester lands on the calendar.
 - A **reminder system** (push, email, in-app, optional SMS) that escalates intelligently when reminders are ignored.
 - An **AI assistant** powered by the Claude API that suggests study times, detects conflicts and procrastination, and learns habits over time.
@@ -16,7 +16,7 @@ A personal productivity system for organizing academic and personal life at High
 
 ## Design principles
 
-1. **The dashboard answers one question: "What should I be doing right now?"**
+1. **The dashboard answers one question: "What should I be doing right now?"** — a NOW/NEXT hero with a live countdown to the next thing; everything else is secondary.
 2. **Three clicks maximum** for any common action; one keystroke for the most common (`Q` = quick add).
 3. **Easier-to-use beats technically-impressive** on every design decision.
 4. **Reliability over speed of development.** Each phase is verified before the next begins.
