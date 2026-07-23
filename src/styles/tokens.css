@@ -1,0 +1,82 @@
+/* Design tokens — the Claude-inspired visual language (ARCHITECTURE §10).
+   Light is the default; `.dark` on <html> flips the palette. */
+
+:root {
+  /* Surfaces */
+  --bg: #faf9f5;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --border: #e8e6e1;
+  --border-strong: #d9d6cf;
+
+  /* Text */
+  --text: #1f1e1d;
+  --text-muted: #6b6a67;
+  --text-faint: #9b998f;
+
+  /* Accent — Claude terracotta */
+  --accent: #d97757;
+  --accent-hover: #c96846;
+  --accent-soft: #f7e9e3;
+  --accent-text: #ffffff;
+
+  /* Status */
+  --danger: #bf4d43;
+  --danger-soft: #f6e5e3;
+  --ok: #7d9b76;
+  --ok-soft: #e9efe7;
+  --warn: #c2a87d;
+  --warn-soft: #f4eee1;
+
+  /* Category palette (muted, warm, distinguishable) */
+  --cat-class: #6a9bcc;
+  --cat-homework: #d97757;
+  --cat-exam: #bf4d43;
+  --cat-personal: #7d9b76;
+  --cat-work: #c2a87d;
+  --cat-practice: #a187be;
+
+  /* Shape + depth */
+  --radius: 0.875rem;
+  --radius-sm: 0.625rem;
+  --shadow-soft: 0 1px 2px rgb(31 30 29 / 0.04), 0 4px 16px rgb(31 30 29 / 0.06);
+  --shadow-raised: 0 2px 4px rgb(31 30 29 / 0.06), 0 8px 28px rgb(31 30 29 / 0.1);
+
+  /* Motion */
+  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --speed: 180ms;
+}
+
+.dark {
+  --bg: #262624;
+  --surface: #30302e;
+  --surface-raised: #383836;
+  --border: #3e3d3a;
+  --border-strong: #4c4b47;
+
+  --text: #f5f4ef;
+  --text-muted: #a6a39c;
+  --text-faint: #7c7a73;
+
+  --accent: #d97757;
+  --accent-hover: #e08a6d;
+  --accent-soft: #453630;
+  --accent-text: #ffffff;
+
+  --danger: #d4685e;
+  --danger-soft: #43302e;
+  --ok: #93b28b;
+  --ok-soft: #333b30;
+  --warn: #cfb68e;
+  --warn-soft: #403a2d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

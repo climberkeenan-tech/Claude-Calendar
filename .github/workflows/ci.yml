@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
+        env:
+          # Build-time placeholder only; runtime uses Vercel env vars.
+          DATABASE_URL: "postgres://ci:ci@localhost:5432/ci"
+          AUTH_SECRET: "ci-placeholder-secret-not-used-at-runtime"
+          AUTH_GOOGLE_ID: "ci"
+          AUTH_GOOGLE_SECRET: "ci"
+          ALLOWED_EMAILS: "ci@example.com"
+          AUTH_TRUST_HOST: "true"

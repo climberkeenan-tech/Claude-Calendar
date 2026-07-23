@@ -1,0 +1,55 @@
+import { cookies } from "next/headers";
+import { auth } from "@/lib/auth";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
+
+export const metadata = { title: "Settings" };
+
+export default async function SettingsPage() {
+  const session = await auth();
+  const initialDark = (await cookies()).get("theme")?.value === "dark";
+
+  return (
+    <div className="mx-auto flex max-w-3xl flex-col gap-5">
+      <h1 className="font-display text-2xl text-ink">Settings</h1>
+
+      <Card>
+        <CardHeader title="Account" />
+        <CardBody className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-ink">{session?.user?.name}</p>
+            <p className="text-xs text-ink-muted">{session?.user?.email}</p>
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Appearance" />
+        <CardBody className="flex items-center justify-between">
+          <p className="text-sm text-ink-muted">Light / dark mode</p>
+          <ThemeToggle initialDark={initialDark} />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Notifications" />
+        <CardBody>
+          <p className="text-sm text-ink-muted">
+            Reminder channels, quiet hours, and per-category defaults arrive in
+            Phase 5.
+          </p>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Claude access" />
+        <CardBody>
+          <p className="text-sm text-ink-muted">
+            MCP access tokens (so Claude Code and claude.ai can manage your
+            calendar) arrive in Phase 6.
+          </p>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
