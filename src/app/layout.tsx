@@ -28,6 +28,12 @@ export const metadata: Metadata = {
   },
   description:
     "Personal productivity system for academic and personal life at High Point University.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "High Point OS",
+  },
 };
 
 export const viewport: Viewport = {

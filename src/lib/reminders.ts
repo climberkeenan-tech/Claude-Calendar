@@ -46,7 +46,8 @@ export async function applyDefaultReminders(
       id: crypto.randomUUID(),
       eventId,
       offsetMinutes,
-      channels: ["push", "email"],
+      // Push first; unacknowledged pushes fall back to email automatically.
+      channels: ["push"],
     })),
   );
 }

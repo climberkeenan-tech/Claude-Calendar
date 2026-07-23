@@ -3,12 +3,23 @@ import { cookies } from "next/headers";
 import { auth } from "@/lib/auth";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { NotificationsPanel } from "@/components/settings/notifications-panel";
+import {
+  countPushSubscriptions,
+  getNotificationSettings,
+} from "@/server/notifications";
+
+export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const session = await auth();
   const initialDark = (await cookies()).get("theme")?.value === "dark";
+  const [notifSettings, pushDevices] = await Promise.all([
+    getNotificationSettings(),
+    countPushSubscriptions(),
+  ]);
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
@@ -49,15 +60,9 @@ export default async function SettingsPage() {
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader title="Notifications" />
-        <CardBody>
-          <p className="text-sm text-ink-muted">
-            Reminder channels, quiet hours, and per-category defaults arrive in
-            Phase 5.
-          </p>
-        </CardBody>
-      </Card>
+      {notifSettings ? (
+        <NotificationsPanel initial={notifSettings} pushDevices={pushDevices} />
+      ) : null}
 
       <Card>
         <CardHeader title="Claude access" />

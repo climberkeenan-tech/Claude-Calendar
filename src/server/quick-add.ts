@@ -9,6 +9,7 @@ import { requireUserId } from "@/lib/auth";
 import { fromFloating } from "@/lib/tz";
 import { applyDefaultReminders } from "@/lib/reminders";
 import { sanitizeRrule } from "@/lib/calendar/sanitize";
+import { syncJobsForEvent } from "@/lib/notifications/scheduler";
 
 /**
  * Create an item from a confirmed quick-add draft. Wall-clock fields arrive as
@@ -132,6 +133,7 @@ export async function createFromDraft(input: unknown): Promise<QuickAddResult> {
   // Per-category default reminders (max 2 — anti-fatigue by design).
   if (!inbox && v.kind !== "habit") {
     await applyDefaultReminders(userId, id, v.categoryName);
+    await syncJobsForEvent(id);
   }
 
   revalidatePath("/");

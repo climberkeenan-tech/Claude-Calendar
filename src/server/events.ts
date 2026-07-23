@@ -5,6 +5,10 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { activityLog, events } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
+import {
+  acknowledgeJobsForEvent,
+  syncJobsForEvent,
+} from "@/lib/notifications/scheduler";
 
 export async function completeEvent(
   eventId: string,
@@ -30,6 +34,10 @@ export async function completeEvent(
       entityId: eventId,
       data: { title: updated[0].title },
     });
+    // Completing is acknowledging; either way the job set re-derives
+    // (completed → future reminders cancel; un-completed → they come back).
+    if (completed) await acknowledgeJobsForEvent(eventId);
+    await syncJobsForEvent(eventId);
   }
   revalidatePath("/");
   revalidatePath("/calendar");

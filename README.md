@@ -34,10 +34,10 @@ A personal productivity system for organizing academic and personal life at High
 | Phase | Name | Status |
 |---|---|---|
 | 1 | Project Planning | ✅ Complete |
-| 2 | UI Design (design system + app shell + dashboard) | ⬜ |
-| 3 | Calendar System | ⬜ |
-| 4 | Event Management | ⬜ |
-| 5 | Reminder System | ⬜ |
+| 2 | UI Design (design system + app shell + dashboard) | ✅ Complete |
+| 3 | Calendar System | ✅ Complete |
+| 4 | Event Management | ✅ Complete |
+| 5 | Reminder System | ✅ Complete (SMS = open gate decision) |
 | 6 | AI Assistant | ⬜ |
 | 7 | Syllabus Import | ⬜ |
 | 8 | Analytics Dashboard | ⬜ |

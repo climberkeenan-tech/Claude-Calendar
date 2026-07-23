@@ -9,6 +9,10 @@ import { requireUserId } from "@/lib/auth";
 import { untilBefore, withUntil } from "@/lib/calendar/recurrence";
 import { isoDayInTz, toFloating, fromFloating } from "@/lib/tz";
 import { ownedCategoryId } from "@/lib/db/ownership";
+import {
+  acknowledgeJobsForEvent,
+  syncJobsForEvent,
+} from "@/lib/notifications/scheduler";
 
 const refresh = () => {
   revalidatePath("/");
@@ -111,6 +115,7 @@ export async function moveEvent(input: z.infer<typeof moveSchema>): Promise<void
       .where(eq(events.id, event.id));
   }
   await log(userId, "event_moved", event.id, { title: event.title });
+  await syncJobsForEvent(event.id);
   refresh();
 }
 
@@ -153,6 +158,7 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
         })
         .where(eq(events.id, event.id));
       await log(userId, "event_edited", event.id, { title: v.title, scope: v.scope });
+      await syncJobsForEvent(event.id);
       refresh();
       return {};
     }
@@ -301,8 +307,10 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
         occurrenceDate: newDate,
       });
     }
+    await syncJobsForEvent(newId);
   }
   await log(userId, "event_edited", event.id, { title: v.title, scope: v.scope });
+  await syncJobsForEvent(event.id);
   refresh();
   return {};
 }
@@ -399,6 +407,10 @@ export async function deleteEvent(input: z.infer<typeof deleteSchema>): Promise<
     }
   }
   await log(userId, "event_deleted", event.id, { title: event.title, scope: v.scope });
+  // Row deletion cascades jobs away; for surviving series (single/future
+  // scopes) this re-derives the job set. Orphaned QStash alarms no-op at
+  // delivery (job row gone).
+  await syncJobsForEvent(event.id);
   refresh();
 }
 
@@ -429,6 +441,8 @@ export async function toggleOccurrence(
     title: event.title,
     date: occurrenceDate,
   });
+  if (completed) await acknowledgeJobsForEvent(eventId);
+  await syncJobsForEvent(eventId);
   refresh();
 }
 
@@ -446,5 +460,6 @@ export async function scheduleTask(eventId: string, dueAt: Date): Promise<void> 
     .set({ dueAt: due, updatedAt: new Date() })
     .where(eq(events.id, event.id));
   await log(userId, "task_scheduled", eventId, { title: event.title });
+  await syncJobsForEvent(eventId);
   refresh();
 }

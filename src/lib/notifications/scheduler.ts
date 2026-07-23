@@ -1,0 +1,399 @@
+/**
+ * DB side of the notification pipeline: materialize `notification_jobs` from
+ * reminder intents, keep QStash alarms in sync, deliver, and sweep.
+ */
+import { and, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import {
+  events,
+  notificationJobs,
+  occurrences,
+  reminders,
+  users,
+  userSettings,
+} from "@/lib/db/schema";
+import {
+  desiredJobs,
+  diffJobs,
+  quietHoursDeferral,
+  ENQUEUE_WINDOW_MS,
+  LEASE_MS,
+  PUSH_FALLBACK_AFTER_MS,
+} from "./policy";
+import { dispatch } from "./channels";
+import { cancelCallback, scheduleCallback } from "./qstash";
+
+/**
+ * Re-derive the job set for one event after any change (create, edit, move,
+ * complete, reminder change). Cancels stale alarms, creates missing jobs,
+ * and sets alarms for anything due inside the QStash window.
+ */
+export async function syncJobsForEvent(eventId: string): Promise<void> {
+  const eventRows = await db.select().from(events).where(eq(events.id, eventId));
+  if (eventRows.length === 0) return;
+  const event = eventRows[0];
+
+  const [reminderRows, overrideRows, existing] = await Promise.all([
+    db.select().from(reminders).where(eq(reminders.eventId, eventId)),
+    db.select().from(occurrences).where(eq(occurrences.eventId, eventId)),
+    db.select().from(notificationJobs).where(eq(notificationJobs.eventId, eventId)),
+  ]);
+
+  const now = new Date();
+  const desired = desiredJobs(
+    {
+      id: event.id,
+      kind: event.kind,
+      status: event.status,
+      startsAt: event.startsAt,
+      endsAt: event.endsAt,
+      dueAt: event.dueAt,
+      rrule: event.rrule,
+      tz: event.tz,
+    },
+    reminderRows.map((r) => ({
+      id: r.id,
+      offsetMinutes: r.offsetMinutes,
+      absoluteAt: r.absoluteAt,
+      channels: r.channels,
+      enabled: r.enabled,
+    })),
+    overrideRows.map((o) => ({
+      occurrenceDate: o.occurrenceDate,
+      cancelled: o.cancelled,
+      completed: o.completed,
+      overrides: o.overrides,
+    })),
+    now,
+  );
+
+  const { create, cancel } = diffJobs(
+    desired,
+    existing.map((e) => ({
+      id: e.id,
+      reminderId: e.reminderId,
+      occurrenceAt: e.occurrenceAt,
+      sendAt: e.sendAt,
+      channel: e.channel,
+      status: e.status,
+    })),
+  );
+
+  for (const c of cancel) {
+    const row = existing.find((e) => e.id === c.id)!;
+    if (row.qstashMessageId) await cancelCallback(row.qstashMessageId);
+    await db
+      .update(notificationJobs)
+      .set({ status: "cancelled" })
+      .where(eq(notificationJobs.id, c.id));
+  }
+
+  for (const d of create) {
+    const id = crypto.randomUUID();
+    let qstashMessageId: string | null = null;
+    if (d.sendAt.getTime() <= now.getTime() + ENQUEUE_WINDOW_MS) {
+      qstashMessageId = await scheduleCallback({ jobId: id, phase: "deliver" }, d.sendAt);
+    }
+    await db.insert(notificationJobs).values({
+      id,
+      reminderId: d.reminderId,
+      eventId,
+      occurrenceAt: d.occurrenceAt,
+      sendAt: d.sendAt,
+      channel: d.channel,
+      qstashMessageId,
+    });
+  }
+}
+
+/** Mark this event's fired-but-unacknowledged notifications as read — called
+ * when the user completes the item (completing IS acknowledging). */
+export async function acknowledgeJobsForEvent(eventId: string): Promise<void> {
+  await db
+    .update(notificationJobs)
+    .set({ status: "acknowledged", ackedAt: new Date() })
+    .where(
+      and(eq(notificationJobs.eventId, eventId), eq(notificationJobs.status, "sent")),
+    );
+}
+
+export type DeliverOutcome =
+  | "delivered"
+  | "skipped"
+  | "deferred"
+  | "failed"
+  | "not_found";
+
+/**
+ * Deliver one job — idempotent and crash-safe:
+ *   pending → (lease) sending → sent on provider accept.
+ * Re-checks event state at delivery time; quiet hours defer, never drop.
+ */
+export async function deliverJob(jobId: string): Promise<DeliverOutcome> {
+  const rows = await db
+    .select()
+    .from(notificationJobs)
+    .where(eq(notificationJobs.id, jobId));
+  if (rows.length === 0) return "not_found";
+  const job = rows[0];
+
+  const now = new Date();
+  const leaseOk =
+    job.status === "pending" ||
+    job.status === "deferred" ||
+    (job.status === "sending" &&
+      job.leaseExpiresAt !== null &&
+      job.leaseExpiresAt.getTime() < now.getTime());
+  if (!leaseOk) return "skipped";
+
+  // Load event + owner; re-check everything that can make this reminder stale.
+  const eventRows = await db
+    .select({
+      id: events.id,
+      userId: events.userId,
+      title: events.title,
+      kind: events.kind,
+      status: events.status,
+      location: events.location,
+      tz: events.tz,
+      rrule: events.rrule,
+    })
+    .from(events)
+    .where(eq(events.id, job.eventId));
+  if (eventRows.length === 0) {
+    await db
+      .update(notificationJobs)
+      .set({ status: "cancelled" })
+      .where(eq(notificationJobs.id, jobId));
+    return "skipped";
+  }
+  const event = eventRows[0];
+  if (event.status !== "scheduled") {
+    await db
+      .update(notificationJobs)
+      .set({ status: "cancelled" })
+      .where(eq(notificationJobs.id, jobId));
+    return "skipped";
+  }
+  if (event.rrule) {
+    const occIso = job.occurrenceAt.toISOString().slice(0, 10);
+    const occ = await db
+      .select()
+      .from(occurrences)
+      .where(
+        and(eq(occurrences.eventId, event.id), eq(occurrences.occurrenceDate, occIso)),
+      );
+    if (occ.length > 0 && (occ[0].cancelled || occ[0].completed)) {
+      await db
+        .update(notificationJobs)
+        .set({ status: "cancelled" })
+        .where(eq(notificationJobs.id, jobId));
+      return "skipped";
+    }
+  }
+
+  const [owner] = await db
+    .select({ email: users.email, tz: users.timezone })
+    .from(users)
+    .where(eq(users.id, event.userId));
+  const [settings] = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.userId, event.userId));
+
+  // Channel preference re-check (user may have turned a channel off).
+  const prefs = settings?.channelPrefs;
+  if (prefs) {
+    const prefKey = { in_app: "inApp", push: "push", email: "email", sms: "sms" }[
+      job.channel
+    ] as keyof typeof prefs | undefined;
+    if (prefKey && prefs[prefKey] === false) {
+      await db
+        .update(notificationJobs)
+        .set({ status: "cancelled" })
+        .where(eq(notificationJobs.id, jobId));
+      return "skipped";
+    }
+  }
+
+  // Quiet hours: defer, never drop (in-app rows are silent — always allowed).
+  if (job.channel !== "in_app" && settings) {
+    const deferUntil = quietHoursDeferral(
+      now,
+      { start: settings.quietHoursStart, end: settings.quietHoursEnd },
+      owner?.tz ?? event.tz,
+    );
+    if (deferUntil) {
+      const qstashMessageId = await scheduleCallback(
+        { jobId, phase: "deliver" },
+        deferUntil,
+      );
+      await db
+        .update(notificationJobs)
+        .set({ status: "deferred", sendAt: deferUntil, qstashMessageId })
+        .where(eq(notificationJobs.id, jobId));
+      return "deferred";
+    }
+  }
+
+  // Take the lease.
+  await db
+    .update(notificationJobs)
+    .set({
+      status: "sending",
+      leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
+      attempts: job.attempts + 1,
+    })
+    .where(eq(notificationJobs.id, jobId));
+
+  const result = await dispatch(job.channel, {
+    jobId,
+    userId: event.userId,
+    userEmail: owner?.email ?? "",
+    title: event.title,
+    kind: event.kind,
+    occurrenceAt: job.occurrenceAt,
+    location: event.location,
+  });
+
+  if (result.ok) {
+    await db
+      .update(notificationJobs)
+      .set({ status: "sent", sentAt: new Date(), leaseExpiresAt: null })
+      .where(eq(notificationJobs.id, jobId));
+    // Reliability net: an unacknowledged push falls back to email.
+    if (job.channel === "push") {
+      await scheduleCallback(
+        { jobId, phase: "fallback" },
+        new Date(Date.now() + PUSH_FALLBACK_AFTER_MS),
+      );
+    }
+    return "delivered";
+  }
+
+  await db
+    .update(notificationJobs)
+    .set({
+      status: job.attempts + 1 >= 5 ? "failed" : "pending",
+      leaseExpiresAt: null,
+    })
+    .where(eq(notificationJobs.id, jobId));
+  return "failed";
+}
+
+/** Push went out but nobody reacted → send the email that can't be missed. */
+export async function pushFallback(jobId: string): Promise<DeliverOutcome> {
+  const rows = await db
+    .select()
+    .from(notificationJobs)
+    .where(eq(notificationJobs.id, jobId));
+  if (rows.length === 0) return "not_found";
+  const job = rows[0];
+  if (job.status !== "sent" || job.ackedAt !== null || job.channel !== "push") {
+    return "skipped";
+  }
+  const eventRows = await db
+    .select({
+      id: events.id,
+      userId: events.userId,
+      title: events.title,
+      kind: events.kind,
+      status: events.status,
+      location: events.location,
+    })
+    .from(events)
+    .where(eq(events.id, job.eventId));
+  if (eventRows.length === 0 || eventRows[0].status !== "scheduled") return "skipped";
+  const event = eventRows[0];
+  const [owner] = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, event.userId));
+  const [settings] = await db
+    .select({ prefs: userSettings.channelPrefs })
+    .from(userSettings)
+    .where(eq(userSettings.userId, event.userId));
+  if (settings?.prefs && settings.prefs.email === false) return "skipped";
+
+  const result = await dispatch("email", {
+    jobId: `${jobId}-fallback`,
+    userId: event.userId,
+    userEmail: owner?.email ?? "",
+    title: event.title,
+    kind: event.kind,
+    occurrenceAt: job.occurrenceAt,
+    location: event.location,
+  });
+  return result.ok ? "delivered" : "failed";
+}
+
+/**
+ * Daily maintenance (Vercel cron is daily-only on Hobby — precision lives in
+ * QStash; this is the horizon-top-up + safety net):
+ *  1. re-materialize jobs for every event with reminders (60-day horizon)
+ *  2. set alarms for jobs entering the 48 h window
+ *  3. deliver anything that slipped past its send time or has a dead lease
+ */
+export async function dailyMaintenance(): Promise<{
+  synced: number;
+  enqueued: number;
+  swept: number;
+}> {
+  const now = new Date();
+
+  const eventIds = await db
+    .selectDistinct({ eventId: reminders.eventId })
+    .from(reminders)
+    .innerJoin(events, eq(reminders.eventId, events.id))
+    .where(eq(events.status, "scheduled"));
+  for (const { eventId } of eventIds) {
+    await syncJobsForEvent(eventId);
+  }
+
+  // Alarms for jobs that just entered the window (syncJobsForEvent covers new
+  // jobs; this catches pre-existing rows created outside the window).
+  const needingAlarm = await db
+    .select({ id: notificationJobs.id, sendAt: notificationJobs.sendAt })
+    .from(notificationJobs)
+    .where(
+      and(
+        eq(notificationJobs.status, "pending"),
+        isNull(notificationJobs.qstashMessageId),
+        lte(notificationJobs.sendAt, new Date(now.getTime() + ENQUEUE_WINDOW_MS)),
+        sql`${notificationJobs.sendAt} > ${now}`,
+      ),
+    );
+  for (const j of needingAlarm) {
+    const messageId = await scheduleCallback({ jobId: j.id, phase: "deliver" }, j.sendAt);
+    if (messageId) {
+      await db
+        .update(notificationJobs)
+        .set({ qstashMessageId: messageId })
+        .where(eq(notificationJobs.id, j.id));
+    }
+  }
+
+  // Sweep: overdue pendings/deferreds and expired sending leases.
+  const overdue = await db
+    .select({ id: notificationJobs.id })
+    .from(notificationJobs)
+    .where(
+      or(
+        and(
+          inArray(notificationJobs.status, ["pending", "deferred"]),
+          lt(notificationJobs.sendAt, new Date(now.getTime() - 5 * 60 * 1000)),
+        ),
+        and(
+          eq(notificationJobs.status, "sending"),
+          lt(notificationJobs.leaseExpiresAt, now),
+        ),
+      ),
+    );
+  let swept = 0;
+  for (const j of overdue) {
+    const outcome = await deliverJob(j.id);
+    if (outcome === "delivered") swept++;
+  }
+
+  return { synced: eventIds.length, enqueued: needingAlarm.length, swept };
+}

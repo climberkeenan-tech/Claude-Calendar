@@ -12,6 +12,7 @@ import {
 } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { ownedCourseId } from "@/lib/db/ownership";
+import { syncJobsForEvent } from "@/lib/notifications/scheduler";
 
 const refresh = () => {
   revalidatePath("/");
@@ -190,10 +191,13 @@ export async function setEventReminders(
         id: crypto.randomUUID(),
         eventId: v.eventId,
         offsetMinutes,
-        channels: ["push", "email"],
+        // Push first; an unacknowledged push falls back to email (§7) —
+        // both-at-once would just train inbox blindness.
+        channels: ["push"],
       })),
     );
   }
+  await syncJobsForEvent(v.eventId);
   refresh();
 }
 

@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { auth, signOut } from "@/lib/auth";
 import { getCategories } from "@/lib/db/queries/dashboard";
+import { getBellFeed } from "@/server/notifications";
+import { NotificationBell } from "@/components/notifications/bell";
 import { SidebarNav, MobileTabs } from "@/components/shell/nav";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ShortcutsOverlay } from "@/components/shortcuts/shortcuts-overlay";
@@ -17,6 +19,7 @@ export default async function AppLayout({
   if (!session?.userId) redirect("/login");
   const initialDark = (await cookies()).get("theme")?.value === "dark";
   const categories = await getCategories(session.userId);
+  const bellFeed = await getBellFeed();
 
   return (
     <div className="flex min-h-dvh w-full">
@@ -59,6 +62,7 @@ export default async function AppLayout({
             {fmtWeekday(new Date())}
           </p>
           <div className="flex items-center gap-1">
+            <NotificationBell initial={bellFeed} />
             <ThemeToggle initialDark={initialDark} />
           </div>
         </header>
