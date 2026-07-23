@@ -3,14 +3,13 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { isTypingTarget } from "@/components/shortcuts/shortcuts-overlay";
+import { shortcutsSuspended } from "@/components/shortcuts/shortcuts-overlay";
 import type { CalendarItem } from "@/lib/db/queries/calendar";
 import { cn } from "@/lib/utils";
 import { TimeGrid } from "./time-grid";
 import { MonthView } from "./month-view";
 import { AgendaView } from "./agenda-view";
 import { EventDialog, type SelectedItem } from "./event-dialog";
-import { QuickAdd } from "@/components/quick-add/quick-add";
 
 export type CalendarView = "day" | "week" | "month" | "agenda";
 type Category = { id: string; name: string; color: string };
@@ -84,7 +83,7 @@ export function CalendarShell({
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isTypingTarget(e.target)) return;
+      if (shortcutsSuspended(e)) return;
       const v = VIEWS.find((x) => x.shortcut === e.key);
       if (v) {
         e.preventDefault();
@@ -168,7 +167,6 @@ export function CalendarShell({
         courses={courses}
         onClose={() => setSelected(null)}
       />
-      <QuickAdd categories={categories} />
     </div>
   );
 }

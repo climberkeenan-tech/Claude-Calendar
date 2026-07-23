@@ -6,7 +6,6 @@ import { dayBounds } from "@/lib/time";
 import { NowNext } from "@/components/dashboard/now-next";
 import { MiniMonth } from "@/components/dashboard/mini-month";
 import { StudyTimer } from "@/components/dashboard/study-timer";
-import { QuickAdd } from "@/components/quick-add/quick-add";
 import {
   Deadlines,
   Habits,
@@ -42,7 +41,6 @@ export default async function DashboardPage() {
         <RecentActivity items={data.activity} />
       </div>
 
-      <QuickAdd categories={data.categories} />
     </div>
   );
 }

@@ -75,11 +75,14 @@ export function relativeDue(now: Date, due: Date, tz: string = DEFAULT_TZ): stri
   const nowIso = dayIso(now);
   const dueIso = dayIso(due);
   if (dueIso === nowIso) return `today ${fmtTime(due, tz)}`;
-  const tomorrowIso = dayIso(new Date(now.getTime() + 24 * 60 * 60 * 1000));
-  const dayAfterIso = dayIso(new Date(now.getTime() + 48 * 60 * 60 * 1000));
-  // Check two candidates so a 23-hour DST day can't skip "tomorrow".
-  if (dueIso === tomorrowIso || (tomorrowIso === nowIso && dueIso === dayAfterIso)) {
-    return `tomorrow ${fmtTime(due, tz)}`;
-  }
+  // Tomorrow = the next CALENDAR day, derived from the date string (noon
+  // anchor), never from now+24h — which lands on the wrong day around both
+  // DST transitions (23 h and 25 h days).
+  const tomorrowIso = new Date(
+    new Date(`${nowIso}T12:00:00Z`).getTime() + 24 * 60 * 60 * 1000,
+  )
+    .toISOString()
+    .slice(0, 10);
+  if (dueIso === tomorrowIso) return `tomorrow ${fmtTime(due, tz)}`;
   return fmtShortDay(due, tz);
 }

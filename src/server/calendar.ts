@@ -37,13 +37,16 @@ async function log(userId: string, type: string, entityId: string, data: Record<
 }
 
 type OverridePatch = {
-  startsAt?: string;
-  endsAt?: string;
-  title?: string;
-  location?: string;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  title?: string | null;
+  location?: string | null;
 };
 
-/** Merge a patch into an occurrence's overrides without clobbering the rest. */
+/** Merge a patch into an occurrence's overrides without clobbering the rest.
+ * Semantics: undefined = leave key alone; null = DELETE the key (occurrence
+ * reverts to the series value — otherwise a one-off rename could never be
+ * undone). */
 async function mergeOccurrenceOverrides(
   eventId: string,
   occurrenceDate: string,
@@ -58,9 +61,11 @@ async function mergeOccurrenceOverrides(
         eq(occurrences.occurrenceDate, occurrenceDate),
       ),
     );
-  const merged: OverridePatch = { ...(existing[0]?.overrides ?? {}) };
+  const merged: Record<string, unknown> = { ...(existing[0]?.overrides ?? {}) };
   for (const [k, v] of Object.entries(patch)) {
-    if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
+    if (v === undefined) continue;
+    if (v === null) delete merged[k];
+    else merged[k] = v;
   }
   await db
     .insert(occurrences)
@@ -134,6 +139,23 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
   v.categoryId = await ownedCategoryId(userId, v.categoryId);
 
   if (!event.rrule || !v.occurrenceDate || v.scope === "series") {
+    if (event.kind === "task") {
+      // Kind invariant: tasks live on dueAt only — a task with startsAt would
+      // render both as a calendar block and a deadline (duplicate items).
+      await db
+        .update(events)
+        .set({
+          title: v.title,
+          location: v.location,
+          categoryId: v.categoryId,
+          dueAt: v.dueAt ?? event.dueAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(events.id, event.id));
+      await log(userId, "event_edited", event.id, { title: v.title, scope: v.scope });
+      refresh();
+      return {};
+    }
     let startsAt = v.startsAt ?? event.startsAt;
     let endsAt = v.endsAt ?? event.endsAt;
     if (event.rrule && event.startsAt && v.startsAt) {
@@ -156,6 +178,9 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
             : 60 * 60 * 1000;
       endsAt = new Date(startsAt.getTime() + durMs);
     }
+    if (startsAt && endsAt && endsAt.getTime() <= startsAt.getTime()) {
+      return { error: "The end time must be after the start time." };
+    }
     await db
       .update(events)
       .set({
@@ -164,14 +189,22 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
         categoryId: v.categoryId,
         startsAt,
         endsAt,
-        dueAt: v.dueAt ?? event.dueAt,
         updatedAt: new Date(),
       })
       .where(eq(events.id, event.id));
   } else if (v.scope === "single") {
+    if (
+      v.startsAt &&
+      v.endsAt &&
+      v.endsAt.getTime() <= v.startsAt.getTime()
+    ) {
+      return { error: "The end time must be after the start time." };
+    }
     await mergeOccurrenceOverrides(event.id, v.occurrenceDate, {
-      title: v.title === event.title ? undefined : v.title,
-      location: v.location ?? undefined,
+      // null deletes the override — editing back to the series value reverts
+      // cleanly instead of pinning a stale copy forever.
+      title: v.title === event.title ? null : v.title,
+      location: !v.location || v.location === event.location ? null : v.location,
       startsAt: v.startsAt?.toISOString(),
       endsAt: v.endsAt?.toISOString(),
     });
@@ -179,7 +212,14 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
     // this-and-future: trim the old series at the ORIGINAL occurrence slot,
     // start a new series at the edited time.
     if (!v.startsAt) return { error: "A start time is required." };
-    const splitAt = v.occurrenceStart ?? v.startsAt;
+    if (v.endsAt && v.endsAt.getTime() <= v.startsAt.getTime()) {
+      return { error: "The end time must be after the start time." };
+    }
+    // Split at the occurrence's ORIGINAL slot, derived from its date + the
+    // series' wall-clock time. Never trust the client's startsAt for this:
+    // for a previously dragged occurrence that's the MOVED time, which splits
+    // in the wrong place and duplicates the instance.
+    const splitAt = originalSlot(v.occurrenceDate, event.startsAt!, event.tz);
     const until = untilBefore(
       { id: event.id, startsAt: event.startsAt!, endsAt: event.endsAt, rrule: event.rrule, tz: event.tz },
       splitAt,
@@ -222,15 +262,45 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
     });
     // Occurrence state (cancellations, completions, moves) at/after the split
     // belongs to the new series — re-key it, or cancelled days resurrect.
-    await db
-      .update(occurrences)
-      .set({ eventId: newId })
+    // When the edit moved the series to a different weekday, rows sitting on
+    // the OLD weekday must also have their dates translated, or they attach
+    // to dates the new rule never generates (ghost/orphaned occurrences).
+    const splitIso = isoDayInTz(splitAt, event.tz);
+    const movedRows = await db
+      .select()
+      .from(occurrences)
       .where(
         and(
           eq(occurrences.eventId, event.id),
-          gte(occurrences.occurrenceDate, isoDayInTz(splitAt, event.tz)),
+          gte(occurrences.occurrenceDate, splitIso),
         ),
       );
+    const fromDow = weekdayInTz(splitAt, event.tz);
+    const toDow = weekdayInTz(v.startsAt, event.tz);
+    let delta = toDow - fromDow;
+    if (delta > 3) delta -= 7;
+    if (delta < -3) delta += 7;
+    for (const row of movedRows) {
+      const rowDow =
+        (new Date(`${row.occurrenceDate}T12:00:00Z`).getUTCDay() + 6) % 7;
+      const newDate =
+        delta !== 0 && rowDow === fromDow
+          ? shiftIsoDate(row.occurrenceDate, delta)
+          : row.occurrenceDate;
+      await db
+        .delete(occurrences)
+        .where(
+          and(
+            eq(occurrences.eventId, event.id),
+            eq(occurrences.occurrenceDate, row.occurrenceDate),
+          ),
+        );
+      await db.insert(occurrences).values({
+        ...row,
+        eventId: newId,
+        occurrenceDate: newDate,
+      });
+    }
   }
   await log(userId, "event_edited", event.id, { title: v.title, scope: v.scope });
   refresh();
@@ -245,6 +315,29 @@ function stripUntil(rruleStr: string): string {
 }
 
 const RRULE_DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+
+/** Monday=0 weekday of an instant, evaluated in the event's timezone. */
+function weekdayInTz(d: Date, tz: string): number {
+  return (toFloating(d, tz).getUTCDay() + 6) % 7;
+}
+
+/** The un-moved instant of an occurrence: its date + the series' wall time. */
+function originalSlot(occurrenceDate: string, seriesStart: Date, tz: string): Date {
+  const f = toFloating(seriesStart, tz);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return fromFloating(
+    new Date(
+      `${occurrenceDate}T${p(f.getUTCHours())}:${p(f.getUTCMinutes())}:${p(f.getUTCSeconds())}Z`,
+    ),
+    tz,
+  );
+}
+
+function shiftIsoDate(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
 /** If a this-and-future edit moved the anchor to a new weekday, swap that day
  * in BYDAY so the new series actually contains its own DTSTART. */
@@ -291,7 +384,7 @@ export async function deleteEvent(input: z.infer<typeof deleteSchema>): Promise<
         set: { cancelled: true },
       });
   } else {
-    const splitStart = v.occurrenceStart ?? new Date();
+    const splitStart = originalSlot(v.occurrenceDate, event.startsAt!, event.tz);
     const until = untilBefore(
       { id: event.id, startsAt: event.startsAt!, endsAt: event.endsAt, rrule: event.rrule, tz: event.tz },
       splitStart,
@@ -345,10 +438,12 @@ export async function toggleOccurrence(
 
 export async function scheduleTask(eventId: string, dueAt: Date): Promise<void> {
   const userId = await requireUserId();
+  const due = z.coerce.date().parse(dueAt);
   const event = await ownedEvent(userId, eventId);
+  if (event.kind !== "task") throw new Error("Only tasks take a due date");
   await db
     .update(events)
-    .set({ dueAt, updatedAt: new Date() })
+    .set({ dueAt: due, updatedAt: new Date() })
     .where(eq(events.id, event.id));
   await log(userId, "task_scheduled", eventId, { title: event.title });
   refresh();

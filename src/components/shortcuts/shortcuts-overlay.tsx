@@ -22,6 +22,15 @@ export function isTypingTarget(el: EventTarget | null): boolean {
   );
 }
 
+/** Global single-key shortcuts must stay quiet while ANY dialog is open —
+ * otherwise "t" navigates away mid-edit and "1" flips the calendar view
+ * under the sheet. Radix portals dialogs to the body, so a DOM check is the
+ * reliable signal across every component. */
+export function shortcutsSuspended(e: KeyboardEvent): boolean {
+  if (isTypingTarget(e.target)) return true;
+  return document.querySelector('[role="dialog"][data-state="open"]') !== null;
+}
+
 export function ShortcutsOverlay() {
   const [open, setOpen] = React.useState(false);
   const router = useRouter();
@@ -29,7 +38,7 @@ export function ShortcutsOverlay() {
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isTypingTarget(e.target)) return;
+      if (shortcutsSuspended(e)) return;
       if (e.key === "?") {
         e.preventDefault();
         setOpen((v) => !v);

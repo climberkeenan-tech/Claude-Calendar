@@ -8,6 +8,7 @@ import { activityLog, categories, events } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { fromFloating } from "@/lib/tz";
 import { applyDefaultReminders } from "@/lib/reminders";
+import { sanitizeRrule } from "@/lib/calendar/sanitize";
 
 /**
  * Create an item from a confirmed quick-add draft. Wall-clock fields arrive as
@@ -17,9 +18,15 @@ import { applyDefaultReminders } from "@/lib/reminders";
 const draftSchema = z.object({
   title: z.string().trim().min(1).max(300),
   kind: z.enum(["event", "task", "habit"]),
-  startLocal: z.string().nullable(), // "2026-09-14T19:00:00"
+  startLocal: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/)
+    .nullable(), // "2026-09-14T19:00:00" — malformed strings must fail Zod, not crash Intl
   durationMinutes: z.number().int().min(5).max(1440).nullable(),
-  dueLocal: z.string().nullable(),
+  dueLocal: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/)
+    .nullable(),
   allDay: z.boolean(),
   rrule: z.string().max(200).nullable(),
   categoryName: z.string().nullable(),
@@ -36,24 +43,6 @@ function localToInstant(local: string): Date {
   return fromFloating(new Date(`${clean}Z`), TZ);
 }
 
-/**
- * Keep only the recurrence pieces the engine supports (FREQ/INTERVAL/BYDAY).
- * COUNT and UNTIL are stripped: COUNT breaks series-splitting math, and an
- * externally supplied UNTIL can encode the drop-the-last-day bug.
- */
-function sanitizeRrule(raw: string | null): string | null {
-  if (!raw) return null;
-  const allowed = new Set(["FREQ", "INTERVAL", "BYDAY"]);
-  const parts = raw
-    .split(";")
-    .map((p) => p.trim())
-    .filter((p) => {
-      const key = p.split("=")[0]?.toUpperCase();
-      return allowed.has(key);
-    });
-  if (!parts.some((p) => p.toUpperCase().startsWith("FREQ="))) return null;
-  return parts.join(";");
-}
 
 export async function createFromDraft(input: unknown): Promise<QuickAddResult> {
   const userId = await requireUserId();
@@ -86,8 +75,22 @@ export async function createFromDraft(input: unknown): Promise<QuickAddResult> {
   } else {
     if (v.startLocal) {
       startsAt = localToInstant(v.startLocal);
-      const dur = v.allDay ? 24 * 60 : (v.durationMinutes ?? 60);
-      endsAt = new Date(startsAt.getTime() + dur * 60 * 1000);
+      if (v.allDay) {
+        // All-day = local midnight to NEXT local midnight (23/24/25 h on DST
+        // days — a flat +24 h leaks into the neighboring day twice a year).
+        const dayIso = v.startLocal.slice(0, 10);
+        const nextIso = new Date(
+          new Date(`${dayIso}T12:00:00Z`).getTime() + 24 * 60 * 60 * 1000,
+        )
+          .toISOString()
+          .slice(0, 10);
+        startsAt = fromFloating(new Date(`${dayIso}T00:00:00Z`), TZ);
+        endsAt = fromFloating(new Date(`${nextIso}T00:00:00Z`), TZ);
+      } else {
+        endsAt = new Date(
+          startsAt.getTime() + (v.durationMinutes ?? 60) * 60 * 1000,
+        );
+      }
     } else if (v.kind === "habit") {
       // Habit without a time: anchor the series at today 00:00 local.
       const today = new Intl.DateTimeFormat("en-CA", {

@@ -60,6 +60,7 @@ export async function getCalendarWindow(
         and(
           eq(events.userId, userId),
           ne(events.status, "cancelled"),
+          ne(events.kind, "task"), // tasks render via dueAt — never twice
           isNull(events.rrule),
           isNotNull(events.startsAt),
           lt(events.startsAt, end),
@@ -145,18 +146,26 @@ export async function getCalendarWindow(
   }
 
   for (const e of recurring) {
-    const expanded = expandEvent(
-      {
-        id: e.id,
-        startsAt: e.startsAt!,
-        endsAt: e.endsAt,
-        rrule: e.rrule,
-        tz: e.tz,
-      },
-      overridesByEvent.get(e.id) ?? [],
-      start,
-      end,
-    );
+    // Belt-and-braces: stored rrules are sanitized at write time, but one bad
+    // legacy row must degrade to "that series missing", never a dead calendar.
+    let expanded: ReturnType<typeof expandEvent>;
+    try {
+      expanded = expandEvent(
+        {
+          id: e.id,
+          startsAt: e.startsAt!,
+          endsAt: e.endsAt,
+          rrule: e.rrule,
+          tz: e.tz,
+        },
+        overridesByEvent.get(e.id) ?? [],
+        start,
+        end,
+      );
+    } catch (err) {
+      console.error(`expandEvent failed for event ${e.id}:`, err);
+      continue;
+    }
     for (const occ of expanded) {
       items.push({
         id: e.id,

@@ -75,6 +75,8 @@ function EventForm({
   onClose: () => void;
 }) {
   const [showDetails, setShowDetails] = React.useState(false);
+  const [detailsMounted, setDetailsMounted] = React.useState(false);
+  const detailsFlushRef = React.useRef<(() => Promise<void>) | null>(null);
   const router = useRouter();
   const isTask = item.kind === "task";
   const anchor = item.startsAt ?? item.dueAt;
@@ -122,11 +124,24 @@ function EventForm({
       endsAt,
       dueAt,
     });
-    setPending(false);
     if (result.error) {
+      setPending(false);
       setError(result.error);
       return;
     }
+    // Unsaved "More details" edits ride along with the main Save — closing
+    // the sheet must never silently discard typed notes.
+    if (detailsFlushRef.current) {
+      try {
+        await detailsFlushRef.current();
+      } catch {
+        setPending(false);
+        setError("Saved the basics, but details failed — they're still in the form.");
+        setShowDetails(true);
+        return;
+      }
+    }
+    setPending(false);
     router.refresh();
     onClose();
   }
@@ -235,8 +250,9 @@ function EventForm({
         <select
           id="ed-cat"
           value={categoryId}
+          disabled={item.recurring && scope === "single"}
           onChange={(e) => setCategoryId(e.target.value)}
-          className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
+          className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink disabled:opacity-50"
         >
           <option value="">None</option>
           {categories.map((c) => (
@@ -246,16 +262,31 @@ function EventForm({
           ))}
         </select>
       </Field>
+      {item.recurring && scope === "single" ? (
+        <p className="-mt-2 text-xs text-ink-faint">
+          Category applies to the whole series — switch scope to change it.
+        </p>
+      ) : null}
 
       <button
         type="button"
-        onClick={() => setShowDetails((v) => !v)}
+        onClick={() => {
+          setShowDetails((v) => !v);
+          setDetailsMounted(true);
+        }}
         className="self-start text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
       >
         {showDetails ? "Hide details" : "More details — priority, checklist, reminders…"}
       </button>
-      {showDetails ? (
-        <EventDetailsSection eventId={item.id} courses={courses} />
+      {/* Stays mounted once opened — hiding must never discard unsaved edits */}
+      {detailsMounted ? (
+        <div hidden={!showDetails}>
+          <EventDetailsSection
+            eventId={item.id}
+            courses={courses}
+            flushRef={detailsFlushRef}
+          />
+        </div>
       ) : null}
 
       {error ? (

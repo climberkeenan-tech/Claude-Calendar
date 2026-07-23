@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { auth, signOut } from "@/lib/auth";
+import { getCategories } from "@/lib/db/queries/dashboard";
 import { SidebarNav, MobileTabs } from "@/components/shell/nav";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ShortcutsOverlay } from "@/components/shortcuts/shortcuts-overlay";
+import { QuickAdd } from "@/components/quick-add/quick-add";
 import { fmtWeekday } from "@/lib/time";
 
 export default async function AppLayout({
@@ -14,6 +16,7 @@ export default async function AppLayout({
   const session = await auth();
   if (!session?.userId) redirect("/login");
   const initialDark = (await cookies()).get("theme")?.value === "dark";
+  const categories = await getCategories(session.userId);
 
   return (
     <div className="flex min-h-dvh w-full">
@@ -66,6 +69,9 @@ export default async function AppLayout({
 
       <MobileTabs />
       <ShortcutsOverlay />
+      {/* One global instance — Q works on every page, exactly as the ? overlay
+          advertises. */}
+      <QuickAdd categories={categories} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { activityLog, focusSessions } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
+import { ownedCourseId } from "@/lib/db/ownership";
 
 export type RunningSession = {
   id: string;
@@ -46,7 +47,7 @@ export async function startFocusSession(
     id: crypto.randomUUID(),
     userId,
     kind: v.kind,
-    courseId: v.courseId,
+    courseId: await ownedCourseId(userId, v.courseId),
     startedAt: new Date(),
   });
   revalidatePath("/");

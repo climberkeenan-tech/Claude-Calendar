@@ -4,7 +4,7 @@ import * as React from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
-import { isTypingTarget } from "@/components/shortcuts/shortcuts-overlay";
+import { shortcutsSuspended } from "@/components/shortcuts/shortcuts-overlay";
 import { CategoryDot } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { parseLocal, type ClaudeDraft, type ParsedDraft } from "@/lib/ai/quick-add";
@@ -68,7 +68,7 @@ export function QuickAdd({ categories }: { categories: Category[] }) {
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isTypingTarget(e.target)) return;
+      if (shortcutsSuspended(e)) return;
       if (e.key.toLowerCase() === "q") {
         e.preventDefault();
         setOpen(true);
@@ -142,10 +142,20 @@ export function QuickAdd({ categories }: { categories: Category[] }) {
     }
     setToast(result.inbox ? "Captured to Inbox — schedule it any time." : "Added.");
     setTimeout(() => setToast(null), 2500);
+    resetParse();
+    setOpen(false);
+  }
+
+  /** Clear all parse state AND invalidate any in-flight Claude refinement —
+   * a late response must never resurrect a ghost draft after confirm/close. */
+  function resetParse() {
+    reqRef.current++;
     setText("");
     setDraft(null);
     setShowDetails(false);
-    setOpen(false);
+    setRefining(false);
+    setRefined(false);
+    setError(null);
   }
 
   const anchor = draft?.startIso ?? draft?.dueIso;
@@ -171,7 +181,13 @@ export function QuickAdd({ categories }: { categories: Category[] }) {
         </div>
       ) : null}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (!o) resetParse();
+        }}
+      >
         <DialogContent
           title="Quick add"
           description="Type it like you'd say it — “Study Biology tomorrow at 7 PM”, “Gym every Monday at 5”, “Essay due Friday”."

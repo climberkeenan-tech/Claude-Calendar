@@ -35,7 +35,13 @@ export async function ensureUser(profile: {
     .select({ id: users.id })
     .from(users)
     .where(eq(users.email, email));
-  if (existing.length > 0) return existing[0].id;
+  if (existing.length > 0) {
+    // Self-heal a partially bootstrapped account (crash between the user
+    // insert and the settings/categories inserts would otherwise leave the
+    // account permanently without defaults — neon-http has no transactions).
+    await repairDefaults(existing[0].id);
+    return existing[0].id;
+  }
 
   const userId = crypto.randomUUID();
   // Race-safe: two concurrent first sign-ins both reach here; the unique
@@ -57,19 +63,30 @@ export async function ensureUser(profile: {
       .where(eq(users.email, email));
     return winner[0].id;
   }
-  await db.insert(userSettings).values({
-    userId,
-    defaultReminders: DEFAULT_REMINDERS,
-  });
-  await db.insert(categories).values(
-    DEFAULT_CATEGORIES.map((c, i) => ({
-      id: crypto.randomUUID(),
-      userId,
-      name: c.name,
-      color: c.color,
-      isDefault: true,
-      position: i,
-    })),
-  );
+  await repairDefaults(userId);
   return userId;
+}
+
+/** Idempotent: creates settings/default categories only where missing. */
+async function repairDefaults(userId: string): Promise<void> {
+  await db
+    .insert(userSettings)
+    .values({ userId, defaultReminders: DEFAULT_REMINDERS })
+    .onConflictDoNothing({ target: userSettings.userId });
+  const existingCats = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(eq(categories.userId, userId));
+  if (existingCats.length === 0) {
+    await db.insert(categories).values(
+      DEFAULT_CATEGORIES.map((c, i) => ({
+        id: crypto.randomUUID(),
+        userId,
+        name: c.name,
+        color: c.color,
+        isDefault: true,
+        position: i,
+      })),
+    );
+  }
 }

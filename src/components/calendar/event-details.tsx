@@ -33,9 +33,13 @@ const PRIORITIES = [
 export function EventDetailsSection({
   eventId,
   courses,
+  flushRef,
 }: {
   eventId: string;
   courses: Course[];
+  /** The parent Save button flushes unsaved detail edits through this ref —
+   * closing the sheet must never silently discard typed notes. */
+  flushRef?: React.MutableRefObject<(() => Promise<void>) | null>;
 }) {
   const router = useRouter();
   const [details, setDetails] = React.useState<EventDetails | null>(null);
@@ -43,6 +47,10 @@ export function EventDetailsSection({
   const [pending, startTransition] = React.useTransition();
   const [newItem, setNewItem] = React.useState("");
   const [dirty, setDirty] = React.useState(false);
+  const [opError, setOpError] = React.useState<string | null>(null);
+  // Serialize reminder writes: two fast chip toggles must land in order, or
+  // the DB can end up matching the FIRST click while the UI shows both.
+  const writeQueue = React.useRef<Promise<void>>(Promise.resolve());
 
   React.useEffect(() => {
     let alive = true;
@@ -58,6 +66,42 @@ export function EventDetailsSection({
     };
   }, [eventId]);
 
+  // Keep a live ref so the parent's flush always saves the LATEST edits.
+  const detailsRef = React.useRef<EventDetails | null>(null);
+  React.useEffect(() => {
+    detailsRef.current = details;
+  }, [details]);
+
+  const persistDetails = React.useCallback(async () => {
+    const d = detailsRef.current;
+    if (!d) return;
+    try {
+      await updateEventDetails({
+        eventId,
+        description: d.description,
+        notes: d.notes,
+        priority: d.priority,
+        estimatedMinutes: d.estimatedMinutes,
+        actualMinutes: d.actualMinutes,
+        tags: d.tags,
+        courseId: d.courseId,
+      });
+      setDirty(false);
+      setOpError(null);
+    } catch {
+      setOpError("Couldn't save details — your edits are still here, try again.");
+      throw new Error("details_save_failed");
+    }
+  }, [eventId]);
+
+  React.useEffect(() => {
+    if (!flushRef) return;
+    flushRef.current = dirty ? persistDetails : null;
+    return () => {
+      flushRef.current = null;
+    };
+  }, [dirty, persistDetails, flushRef]);
+
   if (loadError) {
     return <p className="text-sm text-danger">Couldn&apos;t load details.</p>;
   }
@@ -71,33 +115,31 @@ export function EventDetailsSection({
   };
 
   function saveDetails() {
-    if (!details) return;
     startTransition(async () => {
-      await updateEventDetails({
-        eventId,
-        description: details.description,
-        notes: details.notes,
-        priority: details.priority,
-        estimatedMinutes: details.estimatedMinutes,
-        actualMinutes: details.actualMinutes,
-        tags: details.tags,
-        courseId: details.courseId,
-      });
-      setDirty(false);
-      router.refresh();
+      try {
+        await persistDetails();
+        router.refresh();
+      } catch {
+        /* opError already set; edits preserved */
+      }
     });
   }
 
   function toggleOffset(minutes: number) {
     if (!details) return;
-    const has = details.reminderOffsets.includes(minutes);
-    const next = has
-      ? details.reminderOffsets.filter((m) => m !== minutes)
-      : [...details.reminderOffsets, minutes];
+    const before = details.reminderOffsets;
+    const has = before.includes(minutes);
+    const next = has ? before.filter((m) => m !== minutes) : [...before, minutes];
     setDetails((d) => (d ? { ...d, reminderOffsets: next } : d));
-    startTransition(async () => {
-      await setEventReminders({ eventId, offsets: next });
-    });
+    setOpError(null);
+    writeQueue.current = writeQueue.current.then(() =>
+      setEventReminders({ eventId, offsets: next }).catch(() => {
+        // Roll back to what the server last accepted and say so — a lying
+        // chip is worse than a failed toggle.
+        setDetails((d) => (d ? { ...d, reminderOffsets: before } : d));
+        setOpError("Couldn't update reminders — try again.");
+      }),
+    );
   }
 
   return (
@@ -197,6 +239,11 @@ export function EventDetailsSection({
         />
       </Field>
 
+      {opError ? (
+        <p role="alert" className="text-sm text-danger">
+          {opError}
+        </p>
+      ) : null}
       {dirty ? (
         <Button size="sm" onClick={saveDetails} disabled={pending} className="self-end">
           {pending ? "Saving…" : "Save details"}
@@ -212,6 +259,7 @@ export function EventDetailsSection({
               aria-pressed={item.done}
               aria-label={`Toggle “${item.text}”`}
               onClick={() => {
+                const wasDone = item.done;
                 setDetails((d) =>
                   d
                     ? {
@@ -222,7 +270,23 @@ export function EventDetailsSection({
                       }
                     : d,
                 );
-                startTransition(() => toggleChecklistItem(item.id, !item.done));
+                startTransition(async () => {
+                  try {
+                    await toggleChecklistItem(item.id, !wasDone);
+                  } catch {
+                    setDetails((d) =>
+                      d
+                        ? {
+                            ...d,
+                            checklist: d.checklist.map((c) =>
+                              c.id === item.id ? { ...c, done: wasDone } : c,
+                            ),
+                          }
+                        : d,
+                    );
+                    setOpError("Couldn't update the checklist — try again.");
+                  }
+                });
               }}
               className={cn(
                 "flex size-4.5 items-center justify-center rounded border text-[9px]",
@@ -244,10 +308,18 @@ export function EventDetailsSection({
             <button
               aria-label={`Remove “${item.text}”`}
               onClick={() => {
+                const snapshot = detailsRef.current?.checklist ?? [];
                 setDetails((d) =>
                   d ? { ...d, checklist: d.checklist.filter((c) => c.id !== item.id) } : d,
                 );
-                startTransition(() => deleteChecklistItem(item.id));
+                startTransition(async () => {
+                  try {
+                    await deleteChecklistItem(item.id);
+                  } catch {
+                    setDetails((d) => (d ? { ...d, checklist: snapshot } : d));
+                    setOpError("Couldn't remove the item — try again.");
+                  }
+                });
               }}
               className="text-ink-faint opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
             >
@@ -263,10 +335,15 @@ export function EventDetailsSection({
             if (!text) return;
             setNewItem("");
             startTransition(async () => {
-              const id = await addChecklistItem(eventId, text);
-              setDetails((d) =>
-                d ? { ...d, checklist: [...d.checklist, { id, text, done: false }] } : d,
-              );
+              try {
+                const id = await addChecklistItem(eventId, text);
+                setDetails((d) =>
+                  d ? { ...d, checklist: [...d.checklist, { id, text, done: false }] } : d,
+                );
+              } catch {
+                setNewItem(text); // give the typed text back
+                setOpError("Couldn't add the item — try again.");
+              }
             });
           }}
         >

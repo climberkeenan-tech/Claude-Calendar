@@ -50,6 +50,16 @@ describe("relativeDue calendar-day labels", () => {
     const due = new Date("2026-01-16T02:00:00Z"); // 9 PM EST same day
     expect(relativeDue(now, due)).toMatch(/^today /);
   });
+
+  it("labels the right day in the hour before spring-forward", () => {
+    // Sat Mar 7 2026, 11:30 PM EST. Sunday Mar 8 is the 23-hour day, so
+    // now+24h lands on Mar 9 — "tomorrow" must still mean Mar 8.
+    const now = new Date("2026-03-08T04:30:00Z");
+    const dueMar8 = new Date("2026-03-08T13:00:00Z"); // Sun 9 AM EDT
+    const dueMar9 = new Date("2026-03-09T13:00:00Z"); // Mon 9 AM EDT
+    expect(relativeDue(now, dueMar8)).toMatch(/^tomorrow /);
+    expect(relativeDue(now, dueMar9)).not.toMatch(/^tomorrow /);
+  });
 });
 
 describe("countdown labels", () => {

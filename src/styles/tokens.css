@@ -12,7 +12,8 @@
   /* Text */
   --text: #1f1e1d;
   --text-muted: #6b6a67;
-  --text-faint: #9b998f;
+  /* ≥4.5:1 on --bg — the hour gutter and hint text must stay readable */
+  --text-faint: #75736c;
 
   /* Accent — Claude terracotta */
   --accent: #d97757;
@@ -56,7 +57,8 @@
 
   --text: #f5f4ef;
   --text-muted: #a6a39c;
-  --text-faint: #7c7a73;
+  /* ≥4.5:1 on dark --bg */
+  --text-faint: #98958c;
 
   --accent: #d97757;
   --accent-hover: #e08a6d;
