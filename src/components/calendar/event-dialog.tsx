@@ -8,6 +8,7 @@ import { Input, Field } from "@/components/ui/input";
 import type { CalendarItem } from "@/lib/db/queries/calendar";
 import { deleteEvent, editEvent, toggleOccurrence } from "@/server/calendar";
 import { completeEvent } from "@/server/events";
+import { EventDetailsSection } from "./event-details";
 import { cn } from "@/lib/utils";
 
 export type SelectedItem = { item: CalendarItem };
@@ -27,10 +28,12 @@ function timeVal(d: Date | null): string {
 export function EventDialog({
   selected,
   categories,
+  courses,
   onClose,
 }: {
   selected: SelectedItem | null;
   categories: Category[];
+  courses: { id: string; name: string }[];
   onClose: () => void;
 }) {
   const item = selected?.item ?? null;
@@ -52,6 +55,7 @@ export function EventDialog({
           key={`${item.id}|${item.occurrenceDate ?? ""}`}
           item={item}
           categories={categories}
+          courses={courses}
           onClose={onClose}
         />
       </DialogContent>
@@ -62,12 +66,15 @@ export function EventDialog({
 function EventForm({
   item,
   categories,
+  courses,
   onClose,
 }: {
   item: CalendarItem;
   categories: Category[];
+  courses: { id: string; name: string }[];
   onClose: () => void;
 }) {
+  const [showDetails, setShowDetails] = React.useState(false);
   const router = useRouter();
   const isTask = item.kind === "task";
   const anchor = item.startsAt ?? item.dueAt;
@@ -239,6 +246,17 @@ function EventForm({
           ))}
         </select>
       </Field>
+
+      <button
+        type="button"
+        onClick={() => setShowDetails((v) => !v)}
+        className="self-start text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+      >
+        {showDetails ? "Hide details" : "More details — priority, checklist, reminders…"}
+      </button>
+      {showDetails ? (
+        <EventDetailsSection eventId={item.id} courses={courses} />
+      ) : null}
 
       {error ? (
         <p role="alert" className="text-sm text-danger">

@@ -1,8 +1,11 @@
 import { requireUserId } from "@/lib/auth";
 import { getDashboardData } from "@/lib/db/queries/dashboard";
+import { listCourses } from "@/lib/db/queries/courses";
+import { getRunningSession } from "@/server/focus";
 import { dayBounds } from "@/lib/time";
 import { NowNext } from "@/components/dashboard/now-next";
 import { MiniMonth } from "@/components/dashboard/mini-month";
+import { StudyTimer } from "@/components/dashboard/study-timer";
 import { QuickAdd } from "@/components/quick-add/quick-add";
 import {
   Deadlines,
@@ -10,7 +13,6 @@ import {
   InboxZone,
   ProductivityScore,
   RecentActivity,
-  StudyTimer,
   TodaySchedule,
 } from "@/components/dashboard/zones";
 
@@ -18,7 +20,11 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const userId = await requireUserId();
-  const data = await getDashboardData(userId);
+  const [data, courses, running] = await Promise.all([
+    getDashboardData(userId),
+    listCourses(userId),
+    getRunningSession(),
+  ]);
   const { isoDay } = dayBounds(data.now);
 
   return (
@@ -31,7 +37,7 @@ export default async function DashboardPage() {
         <MiniMonth monthDots={data.monthDots} todayIso={isoDay} />
         <Habits habits={data.habits} weekStartIso={data.weekStartIso} />
         <InboxZone items={data.inbox} />
-        <StudyTimer />
+        <StudyTimer running={running} courses={courses} />
         <ProductivityScore />
         <RecentActivity items={data.activity} />
       </div>

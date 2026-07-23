@@ -128,20 +128,6 @@ export function Habits({ habits, weekStartIso }: { habits: DashboardData["habits
   );
 }
 
-export function StudyTimer() {
-  return (
-    <Card>
-      <CardHeader title="Study timer" />
-      <CardBody>
-        <EmptyState
-          headline="The focus timer arrives in Phase 4"
-          hint="Sessions will feed the analytics you'll see in Phase 8."
-        />
-      </CardBody>
-    </Card>
-  );
-}
-
 export function ProductivityScore() {
   return (
     <Card>

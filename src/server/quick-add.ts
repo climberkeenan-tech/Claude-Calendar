@@ -7,6 +7,7 @@ import { db } from "@/lib/db/client";
 import { activityLog, categories, events } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { fromFloating } from "@/lib/tz";
+import { applyDefaultReminders } from "@/lib/reminders";
 
 /**
  * Create an item from a confirmed quick-add draft. Wall-clock fields arrive as
@@ -125,6 +126,10 @@ export async function createFromDraft(input: unknown): Promise<QuickAddResult> {
     entityId: id,
     data: { title: v.title, kind: v.kind },
   });
+  // Per-category default reminders (max 2 — anti-fatigue by design).
+  if (!inbox && v.kind !== "habit") {
+    await applyDefaultReminders(userId, id, v.categoryName);
+  }
 
   revalidatePath("/");
   revalidatePath("/calendar");

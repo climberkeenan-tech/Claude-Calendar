@@ -1,6 +1,7 @@
 import { requireUserId } from "@/lib/auth";
 import { getCalendarWindow } from "@/lib/db/queries/calendar";
 import { getCategories } from "@/lib/db/queries/dashboard";
+import { listCourses } from "@/lib/db/queries/courses";
 import { dayBounds } from "@/lib/time";
 import { CalendarShell, type CalendarView } from "@/components/calendar/calendar-shell";
 
@@ -48,9 +49,10 @@ export default async function CalendarPage({
     end = new Date(dayStart.getTime() + 31 * DAY);
   }
 
-  const [items, categories] = await Promise.all([
+  const [items, categories, courses] = await Promise.all([
     getCalendarWindow(userId, start, end),
     getCategories(userId),
+    listCourses(userId),
   ]);
 
   return (
@@ -59,6 +61,7 @@ export default async function CalendarPage({
       anchorIso={isoDay}
       items={items}
       categories={categories}
+      courses={courses}
     />
   );
 }

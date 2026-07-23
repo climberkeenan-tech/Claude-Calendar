@@ -49,11 +49,13 @@ export function CalendarShell({
   anchorIso,
   items,
   categories,
+  courses,
 }: {
   view: CalendarView;
   anchorIso: string;
   items: CalendarItem[];
   categories: Category[];
+  courses: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [selected, setSelected] = React.useState<SelectedItem | null>(null);
@@ -163,6 +165,7 @@ export function CalendarShell({
       <EventDialog
         selected={selected}
         categories={categories}
+        courses={courses}
         onClose={() => setSelected(null)}
       />
       <QuickAdd categories={categories} />
