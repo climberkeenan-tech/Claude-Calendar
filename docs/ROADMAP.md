@@ -107,7 +107,7 @@ Each phase below lists its deliverables and the verification checklist that must
 
 A dedicated friction hunt across everything shipped so far.
 
-**Deliverables:** click-count audit (every common action ≤ 3, measured and listed in the repo); load-time pass (route-level code splitting, calendar window prefetch); transition/animation polish; typography + spacing pass; mobile ergonomics (thumb-reachable primary actions); dark/light parity sweep; shortcut coverage review; empty states and error states everywhere.
+**Deliverables:** click-count audit (every common action ≤ 3, measured and listed in the repo); load-time pass (route-level code splitting, calendar window prefetch); transition/animation polish; typography + spacing pass; mobile ergonomics (thumb-reachable primary actions); dark/light parity sweep; shortcut coverage review; empty states and error states everywhere; **timezone consistency pass** — client views currently key dates off the browser's timezone while the server uses the profile timezone (identical while the user is in Eastern time; flagged by the Phase 3 review as latent skew when traveling — unify on the profile timezone end-to-end).
 
 **Verify:** the click-count table published; Lighthouse perf ≥ 90 / a11y ≥ 95 on dashboard + calendar; a full "plan the week on the phone" session performed without touching the laptop.
 
