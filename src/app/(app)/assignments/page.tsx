@@ -7,6 +7,7 @@ import { CategoryDot } from "@/components/ui/badge";
 import { CompleteButton } from "@/components/dashboard/complete-button";
 import { InboxRow } from "@/components/dashboard/inbox-row";
 import { relativeDue } from "@/lib/time";
+import { sortByPriority } from "@/lib/analytics/priority";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Assignments" };
@@ -19,12 +20,14 @@ export default async function AssignmentsPage() {
     eq(events.kind, "task"),
     eq(events.status, "scheduled"),
   );
-  const [dated, inbox] = await Promise.all([
+  const [datedRaw, inbox] = await Promise.all([
     db
       .select({
         id: events.id,
         title: events.title,
         dueAt: events.dueAt,
+        priority: events.priority,
+        estimatedMinutes: events.estimatedMinutes,
         categoryName: categories.name,
         categoryColor: categories.color,
       })
@@ -38,6 +41,9 @@ export default async function AssignmentsPage() {
       .where(and(base, isNull(events.dueAt)))
       .orderBy(asc(events.createdAt)),
   ]);
+  // Auto-prioritization: deadline pressure + priority + stakes, not just
+  // due-date order (Phase 6). Deterministic and explainable.
+  const dated = sortByPriority(datedRaw, now);
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">

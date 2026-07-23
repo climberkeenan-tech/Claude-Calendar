@@ -4,6 +4,8 @@ import { auth } from "@/lib/auth";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { NotificationsPanel } from "@/components/settings/notifications-panel";
+import { ClaudeAccess } from "@/components/settings/claude-access";
+import { listApiTokens } from "@/server/tokens";
 import {
   countPushSubscriptions,
   getNotificationSettings,
@@ -16,10 +18,16 @@ export const metadata = { title: "Settings" };
 export default async function SettingsPage() {
   const session = await auth();
   const initialDark = (await cookies()).get("theme")?.value === "dark";
-  const [notifSettings, pushDevices] = await Promise.all([
+  const [notifSettings, pushDevices, tokens] = await Promise.all([
     getNotificationSettings(),
     countPushSubscriptions(),
+    listApiTokens(),
   ]);
+  const appUrl =
+    process.env.APP_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "https://your-app.vercel.app");
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
@@ -64,15 +72,7 @@ export default async function SettingsPage() {
         <NotificationsPanel initial={notifSettings} pushDevices={pushDevices} />
       ) : null}
 
-      <Card>
-        <CardHeader title="Claude access" />
-        <CardBody>
-          <p className="text-sm text-ink-muted">
-            MCP access tokens (so Claude Code and claude.ai can manage your
-            calendar) arrive in Phase 6.
-          </p>
-        </CardBody>
-      </Card>
+      <ClaudeAccess tokens={tokens} appUrl={appUrl} />
     </div>
   );
 }
