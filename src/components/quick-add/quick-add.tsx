@@ -80,6 +80,10 @@ export function QuickAdd({ categories }: { categories: Category[] }) {
 
   // Local parse happens in the change handler — chips are instant, no effect.
   function onTextChange(next: string) {
+    // Invalidate any in-flight Claude request unconditionally — even when the
+    // new text is too short to trigger a new one, a stale response must not
+    // resurrect chips for text that no longer exists.
+    reqRef.current++;
     setText(next);
     setRefined(false);
     setDraft(next.trim() ? parseLocal(next) : null);
@@ -317,9 +321,29 @@ function DetailsEditor({
         <select
           id="qa-kind"
           value={draft.kind}
-          onChange={(e) =>
-            setDraft((v) => (v ? { ...v, kind: e.target.value as ParsedDraft["kind"] } : v))
-          }
+          onChange={(e) => {
+            const kind = e.target.value as ParsedDraft["kind"];
+            setDraft((v) => {
+              if (!v) return v;
+              // Carry the anchor across the event↔task boundary — switching
+              // type must never silently drop the date into the Inbox.
+              const anchor = v.startIso ?? v.dueIso;
+              if (kind === "task") {
+                return { ...v, kind, dueIso: anchor, startIso: null, endIso: null };
+              }
+              const dur =
+                v.startIso && v.endIso
+                  ? new Date(v.endIso).getTime() - new Date(v.startIso).getTime()
+                  : 60 * 60000;
+              return {
+                ...v,
+                kind,
+                startIso: anchor,
+                endIso: anchor ? new Date(new Date(anchor).getTime() + dur).toISOString() : null,
+                dueIso: null,
+              };
+            });
+          }}
           className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
         >
           <option value="event">Event</option>

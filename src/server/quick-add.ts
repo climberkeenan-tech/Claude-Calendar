@@ -35,6 +35,25 @@ function localToInstant(local: string): Date {
   return fromFloating(new Date(`${clean}Z`), TZ);
 }
 
+/**
+ * Keep only the recurrence pieces the engine supports (FREQ/INTERVAL/BYDAY).
+ * COUNT and UNTIL are stripped: COUNT breaks series-splitting math, and an
+ * externally supplied UNTIL can encode the drop-the-last-day bug.
+ */
+function sanitizeRrule(raw: string | null): string | null {
+  if (!raw) return null;
+  const allowed = new Set(["FREQ", "INTERVAL", "BYDAY"]);
+  const parts = raw
+    .split(";")
+    .map((p) => p.trim())
+    .filter((p) => {
+      const key = p.split("=")[0]?.toUpperCase();
+      return allowed.has(key);
+    });
+  if (!parts.some((p) => p.toUpperCase().startsWith("FREQ="))) return null;
+  return parts.join(";");
+}
+
 export async function createFromDraft(input: unknown): Promise<QuickAddResult> {
   const userId = await requireUserId();
   const parsed = draftSchema.safeParse(input);
@@ -54,6 +73,7 @@ export async function createFromDraft(input: unknown): Promise<QuickAddResult> {
   }
 
   const id = crypto.randomUUID();
+  const rrule = sanitizeRrule(v.rrule);
   let startsAt: Date | null = null;
   let endsAt: Date | null = null;
   let dueAt: Date | null = null;
@@ -90,7 +110,9 @@ export async function createFromDraft(input: unknown): Promise<QuickAddResult> {
     endsAt: inbox ? null : endsAt,
     allDay: v.allDay && !inbox,
     dueAt,
-    rrule: inbox ? null : v.rrule,
+    // Recurrence requires a startsAt anchor: expansion is startsAt-driven, so
+    // a "task with rrule" would silently never recur — store it as one-off.
+    rrule: inbox || v.kind === "task" || !startsAt ? null : rrule,
     tz: TZ,
     habitTargetPerWeek: v.kind === "habit" ? (v.habitTargetPerWeek ?? 7) : null,
     source: "quick_add",

@@ -92,25 +92,34 @@ export async function createEvent(
   return { ok: true };
 }
 
-export async function completeEvent(eventId: string): Promise<void> {
+export async function completeEvent(
+  eventId: string,
+  completed: boolean = true,
+): Promise<void> {
   const userId = await requireUserId();
   const now = new Date();
   const updated = await db
     .update(events)
-    .set({ status: "completed", completedAt: now, updatedAt: now })
+    .set(
+      completed
+        ? { status: "completed", completedAt: now, updatedAt: now }
+        : { status: "scheduled", completedAt: null, updatedAt: now },
+    )
     .where(and(eq(events.id, eventId), eq(events.userId, userId)))
     .returning({ id: events.id, title: events.title });
   if (updated.length > 0) {
     await db.insert(activityLog).values({
       id: crypto.randomUUID(),
       userId,
-      type: "event_completed",
+      type: completed ? "event_completed" : "event_uncompleted",
       entityType: "event",
       entityId: eventId,
       data: { title: updated[0].title },
     });
   }
   revalidatePath("/");
+  revalidatePath("/calendar");
+  revalidatePath("/assignments");
 }
 
 /** Convert a wall-clock date+time in a timezone to the correct UTC instant. */

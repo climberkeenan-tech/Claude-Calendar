@@ -28,6 +28,15 @@ function shiftIso(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Month navigation moves by CALENDAR month (anchored to the 1st) — stepping
+ * 30 days from Jan 31 would skip February entirely. */
+function shiftMonth(iso: string, delta: number): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Monday-start week begin for an ISO day. */
 export function weekStartIso(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`);
@@ -56,7 +65,14 @@ export function CalendarShell({
     [router],
   );
 
-  const step = view === "day" ? 1 : view === "week" ? 7 : view === "month" ? 30 : 30;
+  const step = view === "day" ? 1 : view === "week" ? 7 : 30;
+  const nav = React.useCallback(
+    (dir: -1 | 1) =>
+      view === "month"
+        ? shiftMonth(anchorIso, dir)
+        : shiftIso(anchorIso, dir * step),
+    [view, anchorIso, step],
+  );
   const todayIso = (() => {
     const n = new Date();
     const p = (x: number) => String(x).padStart(2, "0");
@@ -73,15 +89,15 @@ export function CalendarShell({
         go(v.key, anchorIso);
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        go(view, shiftIso(anchorIso, -step));
+        go(view, nav(-1));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        go(view, shiftIso(anchorIso, step));
+        go(view, nav(1));
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, anchorIso, step, go]);
+  }, [view, anchorIso, go, nav]);
 
   const anchorDate = new Date(`${anchorIso}T12:00:00Z`);
   const heading =
@@ -117,13 +133,13 @@ export function CalendarShell({
             ))}
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="secondary" size="sm" aria-label="Previous" onClick={() => go(view, shiftIso(anchorIso, -step))}>
+            <Button variant="secondary" size="sm" aria-label="Previous" onClick={() => go(view, nav(-1))}>
               ←
             </Button>
             <Button variant="secondary" size="sm" onClick={() => go(view, todayIso)}>
               Today
             </Button>
-            <Button variant="secondary" size="sm" aria-label="Next" onClick={() => go(view, shiftIso(anchorIso, step))}>
+            <Button variant="secondary" size="sm" aria-label="Next" onClick={() => go(view, nav(1))}>
               →
             </Button>
           </div>

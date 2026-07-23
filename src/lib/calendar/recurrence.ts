@@ -96,23 +96,59 @@ export function expandEvent(
   }
 
   const rule = buildRule(event);
-  // Pad the floating window by a day on each side: floating time differs from
-  // real time by the UTC offset, so occurrences near the window edge could
-  // otherwise be missed. Real-instant filtering below makes the result exact.
+  // Pad the floating window: a day each side for UTC-offset skew, plus the
+  // event's own duration on the near side so an occurrence that *started*
+  // before the window but is still running is not missed. Post-override
+  // real-instant filtering below makes the result exact.
   const DAY = 24 * 60 * 60 * 1000;
   const floatStart = new Date(
-    toFloating(windowStart, event.tz).getTime() - DAY,
+    toFloating(windowStart, event.tz).getTime() - DAY - durationMs,
   );
   const floatEnd = new Date(toFloating(windowEnd, event.tz).getTime() + DAY);
 
+  const inWindow = (occ: ExpandedOccurrence) => {
+    const end = occ.endsAt ?? occ.startsAt;
+    return occ.startsAt < windowEnd && end >= windowStart;
+  };
+
   const out: ExpandedOccurrence[] = [];
+  const emitted = new Set<string>();
   for (const f of rule.between(floatStart, floatEnd, true)) {
     const start = fromFloating(f, event.tz);
-    const end = durationMs > 0 ? new Date(start.getTime() + durationMs) : start;
-    if (start >= windowEnd || end < windowStart) continue;
     const occ = emit(start);
-    if (occ) out.push(occ);
+    if (!occ) {
+      emitted.add(isoDayInTz(start, event.tz)); // cancelled — still handled
+      continue;
+    }
+    emitted.add(occ.occurrenceDate);
+    // Filter on POST-override times: a moved occurrence belongs to the window
+    // it was moved into, not the one it left.
+    if (inWindow(occ)) out.push(occ);
   }
+  // Time-overridden occurrences whose ORIGINAL slot fell outside the padded
+  // expansion range can still have been moved into this window — emit them.
+  for (const o of overrides) {
+    if (o.cancelled || !o.overrides?.startsAt) continue;
+    if (emitted.has(o.occurrenceDate)) continue;
+    const s = new Date(o.overrides.startsAt);
+    const e = o.overrides.endsAt
+      ? new Date(o.overrides.endsAt)
+      : durationMs > 0
+        ? new Date(s.getTime() + durationMs)
+        : null;
+    const occ: ExpandedOccurrence = {
+      eventId: event.id,
+      occurrenceDate: o.occurrenceDate,
+      startsAt: s,
+      endsAt: e,
+      completed: o.completed,
+      overridden: true,
+      titleOverride: o.overrides.title,
+      locationOverride: o.overrides.location,
+    };
+    if (inWindow(occ)) out.push(occ);
+  }
+  out.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   return out;
 }
 

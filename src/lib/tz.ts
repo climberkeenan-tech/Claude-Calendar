@@ -39,7 +39,12 @@ export function fromFloating(floating: Date, tz: string): Date {
     if (drift === 0) return guess;
     guess = new Date(guess.getTime() + drift);
   }
-  return guess;
+  // Still unconverged → the wall clock doesn't exist (spring-forward gap,
+  // e.g. 2:30 AM on the shift day). Convention: shift forward across the gap
+  // — pick whichever oscillation member lands at/after the requested clock.
+  const seen = toFloating(guess, tz);
+  const other = new Date(guess.getTime() + (floating.getTime() - seen.getTime()));
+  return toFloating(other, tz).getTime() >= floating.getTime() ? other : guess;
 }
 
 /** Convert a "YYYY-MM-DD" + "HH:MM" wall clock in tz to the real instant. */

@@ -109,6 +109,76 @@ describe("expandEvent — overrides", () => {
   });
 });
 
+describe("regressions from adversarial review", () => {
+  it("nonexistent spring-forward wall clock shifts FORWARD (2:30 → 3:30 EDT)", () => {
+    // 2:30 AM doesn't exist on 2026-03-08 in New York; convention: shift
+    // forward across the gap, never render an earlier hour.
+    const instant = wallClockToInstant("2026-03-08", "02:30", TZ);
+    expect(instant.toISOString()).toBe("2026-03-08T07:30:00.000Z"); // 3:30 EDT
+  });
+
+  it("an occurrence moved into a window is returned by that window", () => {
+    // Feb 16 (Mon) occurrence moved to Feb 24 (Tue) — expanding the week of
+    // Feb 23 must include it, keyed to its original date.
+    const occ = expandEvent(
+      mondayGym,
+      [
+        {
+          occurrenceDate: "2026-02-16",
+          cancelled: false,
+          completed: false,
+          overrides: {
+            startsAt: "2026-02-24T22:00:00.000Z",
+            endsAt: "2026-02-24T23:00:00.000Z",
+          },
+        },
+      ],
+      new Date("2026-02-23T00:00:00Z"),
+      new Date("2026-03-02T00:00:00Z"),
+    );
+    const dates = occ.map((o) => o.occurrenceDate);
+    expect(dates).toContain("2026-02-16"); // the moved one
+    expect(dates).toContain("2026-02-23"); // the regular Monday
+    // ...and the window it left no longer shows it
+    const oldWeek = expandEvent(
+      mondayGym,
+      [
+        {
+          occurrenceDate: "2026-02-16",
+          cancelled: false,
+          completed: false,
+          overrides: {
+            startsAt: "2026-02-24T22:00:00.000Z",
+            endsAt: "2026-02-24T23:00:00.000Z",
+          },
+        },
+      ],
+      new Date("2026-02-16T00:00:00Z"),
+      new Date("2026-02-23T00:00:00Z"),
+    );
+    expect(oldWeek.map((o) => o.occurrenceDate)).not.toContain("2026-02-16");
+  });
+
+  it("a multi-day occurrence straddling windowStart is included", () => {
+    // Weekly Friday 5 PM → Monday 9 AM (64 h). A window opening Sunday must
+    // still show the in-progress occurrence that started Friday.
+    const longEvent: SeriesEvent = {
+      id: "trip",
+      startsAt: new Date("2026-02-06T22:00:00Z"), // Fri 5 PM EST
+      endsAt: new Date("2026-02-09T14:00:00Z"), // Mon 9 AM EST
+      rrule: "FREQ=WEEKLY;BYDAY=FR",
+      tz: TZ,
+    };
+    const occ = expandEvent(
+      longEvent,
+      [],
+      new Date("2026-02-08T05:00:00Z"), // Sunday midnight EST
+      new Date("2026-02-09T05:00:00Z"),
+    );
+    expect(occ.map((o) => o.occurrenceDate)).toContain("2026-02-06");
+  });
+});
+
 describe("expandEvent — non-recurring", () => {
   it("returns the event only when it intersects the window", () => {
     const single: SeriesEvent = {

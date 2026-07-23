@@ -108,20 +108,27 @@ export function TimeGrid({
     if (!item.startsAt && !item.dueAt) return;
     e.preventDefault();
     e.stopPropagation();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    // Capture on the grid, not the event box — the box unmounts on the next
+    // render (it's filtered out for the ghost), which would release capture
+    // and leave a sticky drag that commits on the next stray click.
+    gridRef.current?.setPointerCapture(e.pointerId);
     const anchor = item.startsAt ?? item.dueAt!;
     const end = item.endsAt ?? new Date(anchor.getTime() + 30 * 60000);
+    // True duration in minutes — never minute-of-day arithmetic, which
+    // corrupts events that end at or after midnight.
+    const durMin = Math.max(SNAP_MIN, Math.round((end.getTime() - anchor.getTime()) / 60000));
+    const startMin = minOf(anchor);
     const dayIdx = dayIsos.indexOf(isoOf(anchor));
     setDrag({
       item,
       mode,
       dayIdx,
-      startMin: minOf(anchor),
-      endMin: minOf(anchor) === 0 && minOf(end) === 0 ? 24 * 60 : minOf(end) || minOf(anchor) + 30,
+      startMin,
+      endMin: startMin + durMin,
       pointerStartY: e.clientY,
       pointerStartX: e.clientX,
-      origStartMin: minOf(anchor),
-      origEndMin: minOf(end) || minOf(anchor) + 30,
+      origStartMin: startMin,
+      origEndMin: startMin + durMin,
       origDayIdx: dayIdx,
       moved: false,
     });
@@ -137,7 +144,9 @@ export function TimeGrid({
       const dur = drag.origEndMin - drag.origStartMin;
       const pointerOffset = drag.origStartMin - snapPointerStart(drag);
       let start = snap(min + pointerOffset);
-      start = Math.max(0, Math.min(24 * 60 - dur, start));
+      // Keep the start inside the day; a long event may legitimately end
+      // past midnight (duration is preserved at commit).
+      start = Math.max(0, Math.min(24 * 60 - Math.min(dur, 24 * 60), start));
       setDrag({ ...drag, startMin: start, endMin: start + dur, dayIdx, moved });
     } else {
       const end = Math.max(drag.origStartMin + SNAP_MIN, snap(min));
@@ -241,6 +250,7 @@ export function TimeGrid({
             style={{ height: 24 * HOUR_PX }}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onPointerCancel={() => setDrag(null)}
           >
             {/* Hour lines */}
             {Array.from({ length: 24 }, (_, h) => (

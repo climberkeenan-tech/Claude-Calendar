@@ -106,6 +106,7 @@ function EventForm({
     const result = await editEvent({
       eventId: item.id,
       occurrenceDate: item.occurrenceDate,
+      occurrenceStart: item.startsAt,
       scope: item.recurring ? scope : "series",
       title,
       location: location || null,
@@ -129,7 +130,7 @@ function EventForm({
     if (item.recurring && item.occurrenceDate) {
       await toggleOccurrence(item.id, item.occurrenceDate, !item.completed);
     } else {
-      await completeEvent(item.id);
+      await completeEvent(item.id, !item.completed);
     }
     setPending(false);
     router.refresh();
@@ -185,12 +186,24 @@ function EventForm({
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Date" htmlFor="ed-date">
-          <Input id="ed-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Input
+            id="ed-date"
+            type="date"
+            value={date}
+            disabled={item.recurring && scope === "series"}
+            onChange={(e) => setDate(e.target.value)}
+          />
         </Field>
         <Field label={isTask ? "Due time" : "Start time"} htmlFor="ed-time">
           <Input id="ed-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
         </Field>
       </div>
+      {item.recurring && scope === "series" ? (
+        <p className="-mt-2 text-xs text-ink-faint">
+          The whole series keeps its days — change the time or duration here, or
+          use “This one” / “This &amp; future” to move dates.
+        </p>
+      ) : null}
 
       {!isTask ? (
         <div className="grid grid-cols-2 gap-3">
