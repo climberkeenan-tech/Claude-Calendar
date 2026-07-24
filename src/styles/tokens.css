@@ -37,6 +37,21 @@
   --cat-work: #c2a87d;
   --cat-practice: #a187be;
 
+  /* Charts (Phase 8) — one-hue terracotta ramp, machine-validated (dataviz
+     six-checks, ordinal mode) against the light card surface #ffffff:
+     monotone lightness, ΔL ≥ 0.06 per step, light end 2.15:1. --chart-mark
+     is the single-series bar/line color (3.12:1 on white — clears the 3:1
+     mark floor). Ramp-0 is the heatmap's "no activity" cell and is allowed
+     to recede. */
+  --chart-mark: #d97757;
+  --chart-ramp-0: #f1efe9;
+  --chart-ramp-1: #e2a37b;
+  --chart-ramp-2: #d97757;
+  --chart-ramp-3: #b85a3c;
+  --chart-ramp-4: #8f4227;
+  --chart-grid: #f0eeea;
+  --chart-axis: #d9d6cf;
+
   /* Shape + depth */
   --radius: 0.875rem;
   --radius-sm: 0.625rem;
@@ -71,6 +86,17 @@
   --ok-soft: #333b30;
   --warn: #cfb68e;
   --warn-soft: #403a2d;
+
+  /* Charts — same hue family re-stepped for the dark card surface #30302e
+     (brighter = more, validated: light end 2.03:1, mark 4.24:1). */
+  --chart-mark: #d97757;
+  --chart-ramp-0: #3a3a37;
+  --chart-ramp-1: #815339;
+  --chart-ramp-2: #a5643f;
+  --chart-ramp-3: #cd7c52;
+  --chart-ramp-4: #eda07b;
+  --chart-grid: #3a3a37;
+  --chart-axis: #4c4b47;
 }
 
 @media (prefers-reduced-motion: reduce) {

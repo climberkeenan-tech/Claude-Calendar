@@ -4,6 +4,7 @@ import { users } from "@/lib/db/schema";
 import { dailyMaintenance } from "@/lib/notifications/scheduler";
 import { runEscalationForUser } from "@/lib/notifications/escalation";
 import { derivePatterns } from "@/lib/analytics/patterns";
+import { rollupUser } from "@/lib/analytics/rollup";
 import { expireInsights, runInsightsForUser } from "@/lib/ai/insights";
 
 export const maxDuration = 300;
@@ -32,6 +33,12 @@ export async function GET(req: Request): Promise<Response> {
 
   const allUsers = await db.select({ id: users.id }).from(users);
   for (const u of allUsers) {
+    try {
+      // Rollups feed everything downstream (patterns, insights, charts).
+      report.rollup = await rollupUser(u.id);
+    } catch (err) {
+      report.rollup = `failed: ${String(err)}`;
+    }
     try {
       await derivePatterns(u.id);
       report.patterns = "ok";

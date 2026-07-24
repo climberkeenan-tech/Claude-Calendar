@@ -8,11 +8,12 @@ import { MiniMonth } from "@/components/dashboard/mini-month";
 import { StudyTimer } from "@/components/dashboard/study-timer";
 import { InsightsDigest } from "@/components/dashboard/insights";
 import { getInsights } from "@/server/insights";
+import { getWeekScore } from "@/lib/analytics/summary";
+import { ScoreCard } from "@/components/analytics/score-card";
 import {
   Deadlines,
   Habits,
   InboxZone,
-  ProductivityScore,
   RecentActivity,
   TodaySchedule,
 } from "@/components/dashboard/zones";
@@ -21,11 +22,12 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const userId = await requireUserId();
-  const [data, courses, running, insights] = await Promise.all([
+  const [data, courses, running, insights, weekScore] = await Promise.all([
     getDashboardData(userId),
     listCourses(userId),
     getRunningSession(),
     getInsights(),
+    getWeekScore(userId),
   ]);
   const { isoDay } = dayBounds(data.now);
 
@@ -41,7 +43,7 @@ export default async function DashboardPage() {
         <InboxZone items={data.inbox} />
         <StudyTimer running={running} courses={courses} />
         <InsightsDigest initial={insights} />
-        <ProductivityScore />
+        <ScoreCard view={weekScore} hiddenFallback="none" />
         <RecentActivity items={data.activity} />
       </div>
 

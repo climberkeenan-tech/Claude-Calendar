@@ -7,6 +7,7 @@ import { getCalendarWindow } from "@/lib/db/queries/calendar";
 import { createItemForUser, localToInstant } from "@/lib/items/create";
 import { completeItemForUser } from "@/lib/items/complete";
 import { verifyBearer } from "@/lib/mcp/tokens";
+import { getWeekScore } from "@/lib/analytics/summary";
 import { dayBounds, fmtShortDay, fmtTime, relativeDue } from "@/lib/time";
 import { syncJobsForEvent } from "@/lib/notifications/scheduler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
@@ -207,7 +208,7 @@ const handler = createMcpHandler(
       async (_args, { authInfo }) => {
         const userId = userIdOf(authInfo);
         const since = new Date(Date.now() - 7 * 24 * 3600_000);
-        const [focus, completed, open, patterns] = await Promise.all([
+        const [focus, completed, open, patterns, week] = await Promise.all([
           db
             .select({ minutes: sql<number>`coalesce(sum(${focusSessions.durationMinutes}),0)::int` })
             .from(focusSessions)
@@ -233,11 +234,25 @@ const handler = createMcpHandler(
               ),
             ),
           db.select().from(userPatterns).where(eq(userPatterns.userId, userId)),
+          getWeekScore(userId),
         ]);
+        // The SAME weekly score core the app renders — Claude never quotes a
+        // different number than the page. Hidden stays hidden here too.
+        const scoreLines =
+          week.visible && week.score !== null
+            ? [
+                `Weekly score: ${week.score}/100 (${week.parts.map((p) => `${p.label}: ${p.detail}`).join("; ")}).`,
+                week.wins.length > 0 ? `Wins: ${week.wins.join(" · ")}.` : null,
+                `Suggested next move: ${week.nextAction}`,
+              ]
+            : week.visible
+              ? []
+              : ["Weekly score: hidden by the user's choice — don't bring it up."];
         return text(
           [
             `Last 7 days: ${focus[0].minutes} focus minutes, ${completed[0].n} items completed.`,
             `Open tasks: ${open[0].n}.`,
+            ...scoreLines.filter((l): l is string => l !== null),
             patterns[0]
               ? `Patterns: ${JSON.stringify(patterns[0].patterns).slice(0, 800)}`
               : "Patterns: not derived yet (first nightly run pending).",

@@ -128,20 +128,6 @@ export function Habits({ habits, weekStartIso }: { habits: DashboardData["habits
   );
 }
 
-export function ProductivityScore() {
-  return (
-    <Card>
-      <CardHeader title="This week" />
-      <CardBody>
-        <EmptyState
-          headline="Your weekly summary arrives in Phase 8"
-          hint="Wins first, one suggested next action — and it's hideable."
-        />
-      </CardBody>
-    </Card>
-  );
-}
-
 export function RecentActivity({ items }: { items: DashboardData["activity"] }) {
   const labels: Record<string, string> = {
     event_created: "Added",
