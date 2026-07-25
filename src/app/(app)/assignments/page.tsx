@@ -91,7 +91,7 @@ export default async function AssignmentsPage() {
                         {t.title}
                       </span>
                       <span
-                        className={`shrink-0 font-mono text-xs ${overdue ? "text-danger" : "text-ink-muted"}`}
+                        className={`shrink-0 font-mono text-xs ${overdue ? "text-danger-ink" : "text-ink-muted"}`}
                       >
                         {t.dueAt ? relativeDue(now, t.dueAt) : ""}
                       </span>

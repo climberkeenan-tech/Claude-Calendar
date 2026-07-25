@@ -10,8 +10,11 @@ const variants: Record<Variant, string> = {
   secondary:
     "bg-surface text-ink border border-border hover:border-border-strong hover:bg-surface-raised shadow-soft",
   ghost: "bg-transparent text-ink-muted hover:text-ink hover:bg-accent-soft/60",
+  // The fill keeps the light-mode red in BOTH themes so white text clears AA
+  // on it; in dark that fill is too close to the surface, so the --danger
+  // border carries the control's boundary (1.4.11) instead.
   danger:
-    "bg-danger text-white hover:opacity-90 shadow-soft border border-transparent",
+    "bg-danger-solid text-white hover:brightness-110 shadow-soft border border-danger",
 };
 
 const sizes: Record<Size, string> = {

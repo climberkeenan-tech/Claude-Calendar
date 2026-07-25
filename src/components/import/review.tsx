@@ -3,8 +3,9 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Card, CardBody, CardHeader, EmptyState } from "@/components/ui/card";
 import { Input, Field } from "@/components/ui/input";
+import { RadioChips, type RadioChipOption } from "@/components/ui/radio-chips";
 import { cn } from "@/lib/utils";
 import {
   draftToApproveItem,
@@ -13,6 +14,14 @@ import {
 } from "@/lib/import/map";
 import type { SyllabusExtraction } from "@/lib/import/schema";
 import { approveImport } from "@/server/imports";
+
+type CourseMode = "create" | "link" | "none";
+
+const COURSE_MODES: readonly RadioChipOption<CourseMode>[] = [
+  { value: "create", label: "Create new course" },
+  { value: "link", label: "Link existing" },
+  { value: "none", label: "No course" },
+];
 
 type CourseOption = { id: string; name: string; code: string | null };
 
@@ -55,7 +64,7 @@ export function ImportReview({
   const existingMatch = courses.find(
     (c) => c.name.toLowerCase() === extractedName.toLowerCase(),
   );
-  const [courseMode, setCourseMode] = React.useState<"create" | "link" | "none">(
+  const [courseMode, setCourseMode] = React.useState<CourseMode>(
     existingMatch ? "link" : extractedName ? "create" : "none",
   );
   const [linkCourseId, setLinkCourseId] = React.useState<string>(
@@ -109,31 +118,14 @@ export function ImportReview({
       <Card>
         <CardHeader title="Course" />
         <CardBody className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Course handling">
-            {(
-              [
-                ["create", "Create new course"],
-                ["link", "Link existing"],
-                ["none", "No course"],
-              ] as const
-            ).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={courseMode === mode}
-                onClick={() => setCourseMode(mode)}
-                className={cn(
-                  "rounded-full border px-3 py-1 text-sm transition-colors",
-                  courseMode === mode
-                    ? "border-accent bg-accent-soft text-ink"
-                    : "border-border text-ink-muted hover:border-border-strong",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <RadioChips
+            label="Course handling"
+            value={courseMode}
+            onChange={setCourseMode}
+            className="gap-2"
+            chipClassName="rounded-full px-3 py-1 text-sm"
+            options={COURSE_MODES}
+          />
 
           {courseMode === "create" ? (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -174,7 +166,7 @@ export function ImportReview({
                 id="imp-course-link"
                 value={linkCourseId}
                 onChange={(e) => setLinkCourseId(e.target.value)}
-                className="h-10 w-full rounded-(--radius-sm) border border-border bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 sm:max-w-xs"
+                className="h-10 w-full rounded-(--radius-sm) border border-border-input bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 sm:max-w-xs"
               >
                 {courses.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -195,7 +187,7 @@ export function ImportReview({
             <div className="flex gap-2 text-xs">
               <button
                 type="button"
-                className="text-accent hover:underline"
+                className="text-accent-ink hover:underline"
                 onClick={() =>
                   setDrafts((ds) =>
                     ds.map((d) => ({ ...d, accepted: d.date !== null })),
@@ -217,12 +209,18 @@ export function ImportReview({
           }
         />
         <CardBody className="flex flex-col divide-y divide-border">
+          {drafts.length === 0 ? (
+            <EmptyState
+              headline="Claude didn't find any dates in this file"
+              hint="Scanned PDFs and image-only syllabi have no text to read. Add the deadlines with Q, or upload a text-based copy."
+            />
+          ) : null}
           {drafts.map((d) => (
             <div
               key={d.key}
               className={cn(
-                "flex flex-col gap-2 py-3",
-                !d.accepted && "opacity-55",
+                "flex flex-col gap-2 border-l-2 py-3 pl-2 transition-colors",
+                d.accepted ? "border-l-transparent" : "border-l-border-strong bg-surface-raised/60",
               )}
             >
               <div className="flex flex-wrap items-center gap-2">
@@ -231,7 +229,7 @@ export function ImportReview({
                   aria-label={`Include "${d.title}"`}
                   checked={d.accepted}
                   onChange={(e) => patch(d.key, { accepted: e.target.checked })}
-                  className="size-4 accent-(--accent)"
+                  className="size-5 shrink-0 accent-(--accent)"
                 />
                 <span className="shrink-0 rounded-full bg-surface-raised px-2 py-0.5 text-xs text-ink-muted">
                   {KIND_LABEL[d.originalKind]}
@@ -263,7 +261,7 @@ export function ImportReview({
                       accepted: e.target.value ? d.accepted : false,
                     })
                   }
-                  className="h-8 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink focus:border-accent focus:outline-none"
+                  className="h-8 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink focus:border-accent focus:outline-none"
                 />
                 {d.kind === "event" && d.allDay ? (
                   <span className="text-xs text-ink-faint">all day</span>
@@ -275,7 +273,7 @@ export function ImportReview({
                     onChange={(e) =>
                       patch(d.key, { startTime: e.target.value || null })
                     }
-                    className="h-8 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink focus:border-accent focus:outline-none"
+                    className="h-8 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink focus:border-accent focus:outline-none"
                   />
                 )}
                 {d.kind === "event" && !d.allDay && d.durationMinutes ? (
@@ -292,7 +290,7 @@ export function ImportReview({
                   </span>
                 ) : null}
                 {!d.date ? (
-                  <span className="text-xs text-warn">
+                  <span className="text-xs text-warn-ink">
                     no date — set one to include it
                   </span>
                 ) : null}
@@ -317,12 +315,12 @@ export function ImportReview({
           <span className="font-medium text-ink">{acceptedCount}</span> of{" "}
           {drafts.length} will be added
           {lowConfidence > 0 ? (
-            <span className="ml-2 text-xs text-warn">
+            <span className="ml-2 text-xs text-warn-ink">
               {lowConfidence} flagged for a second look
             </span>
           ) : null}
           {error ? (
-            <p role="alert" className="mt-0.5 truncate text-xs text-danger">
+            <p role="alert" className="mt-0.5 truncate text-xs text-danger-ink">
               {error}
             </p>
           ) : null}

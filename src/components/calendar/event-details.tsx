@@ -104,7 +104,7 @@ export function EventDetailsSection({
   }, [dirty, persistDetails, flushRef]);
 
   if (loadError) {
-    return <p className="text-sm text-danger">Couldn&apos;t load details.</p>;
+    return <p className="text-sm text-danger-ink">Couldn&apos;t load details.</p>;
   }
   if (!details) {
     return <p className="py-4 text-center text-sm text-ink-faint">Loading details…</p>;
@@ -151,7 +151,7 @@ export function EventDetailsSection({
             id="det-priority"
             value={details.priority}
             onChange={(e) => patch({ priority: e.target.value as EventDetails["priority"] })}
-            className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
+            className="h-10 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink"
           >
             {PRIORITIES.map((p) => (
               <option key={p.key} value={p.key}>
@@ -165,7 +165,7 @@ export function EventDetailsSection({
             id="det-course"
             value={details.courseId ?? ""}
             onChange={(e) => patch({ courseId: e.target.value || null })}
-            className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
+            className="h-10 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink"
           >
             <option value="">None</option>
             {courses.map((c) => (
@@ -207,7 +207,7 @@ export function EventDetailsSection({
           value={details.description ?? ""}
           onChange={(e) => patch({ description: e.target.value || null })}
           rows={2}
-          className="rounded-(--radius-sm) border border-border bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+          className="rounded-(--radius-sm) border border-border-input bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
           placeholder="What is this?"
         />
       </Field>
@@ -218,7 +218,7 @@ export function EventDetailsSection({
           value={details.notes ?? ""}
           onChange={(e) => patch({ notes: e.target.value || null })}
           rows={2}
-          className="rounded-(--radius-sm) border border-border bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+          className="rounded-(--radius-sm) border border-border-input bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
           placeholder="Anything to remember"
         />
       </Field>
@@ -241,7 +241,7 @@ export function EventDetailsSection({
       </Field>
 
       {opError ? (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-sm text-danger-ink">
           {opError}
         </p>
       ) : null}
@@ -292,7 +292,7 @@ export function EventDetailsSection({
               className={cn(
                 "flex size-4.5 items-center justify-center rounded border text-[9px]",
                 item.done
-                  ? "border-ok bg-ok text-white"
+                  ? "border-ok bg-ok text-ink"
                   : "border-border-strong text-transparent hover:border-ok",
               )}
             >
@@ -322,7 +322,7 @@ export function EventDetailsSection({
                   }
                 });
               }}
-              className="text-ink-faint opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+              className="text-ink-faint opacity-0 transition-opacity hover:text-danger-ink group-hover:opacity-100"
             >
               ×
             </button>

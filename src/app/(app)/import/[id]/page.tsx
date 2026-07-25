@@ -42,7 +42,7 @@ export default async function ImportDetailPage({
         </h1>
         <Link
           href="/import"
-          className="shrink-0 text-sm text-accent hover:underline"
+          className="shrink-0 text-sm text-accent-ink hover:underline"
         >
           ← All imports
         </Link>

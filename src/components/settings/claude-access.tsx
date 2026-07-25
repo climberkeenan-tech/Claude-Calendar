@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ActionError, useActionGuard } from "@/components/ui/action-error";
 import { fmtIsoDay, isoDay } from "@/lib/time";
 import {
   createApiToken,
@@ -22,6 +23,7 @@ export function ClaudeAccess({
   const [pending, startTransition] = React.useTransition();
   const [fresh, setFresh] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const guard = useActionGuard();
   const active = tokens.filter((t) => !t.revokedAt);
 
   return (
@@ -47,7 +49,12 @@ export function ClaudeAccess({
               variant="secondary"
               className="self-start"
               onClick={async () => {
-                await navigator.clipboard.writeText(fresh);
+                // Clipboard access can be denied outright (permissions, http).
+                const ok = await guard.run(
+                  () => navigator.clipboard.writeText(fresh),
+                  "Clipboard blocked — select the token above and copy it manually.",
+                );
+                if (!ok) return;
                 setCopied(true);
                 setTimeout(() => setCopied(false), 2000);
               }}
@@ -73,8 +80,11 @@ export function ClaudeAccess({
                   disabled={pending}
                   onClick={() =>
                     startTransition(async () => {
-                      await revokeApiToken(t.id);
-                      router.refresh();
+                      const ok = await guard.run(
+                        () => revokeApiToken(t.id),
+                        "Couldn't revoke that token — try again.",
+                      );
+                      if (ok) router.refresh();
                     })
                   }
                 >
@@ -91,16 +101,19 @@ export function ClaudeAccess({
           disabled={pending}
           onClick={() =>
             startTransition(async () => {
-              const token = await createApiToken(
-                `Claude access · ${fmtIsoDay(isoDay(new Date()), { month: "short", day: "numeric" })}`,
-              );
-              setFresh(token);
-              router.refresh();
+              const ok = await guard.run(async () => {
+                const token = await createApiToken(
+                  `Claude access · ${fmtIsoDay(isoDay(new Date()), { month: "short", day: "numeric" })}`,
+                );
+                setFresh(token);
+              }, "Couldn't create a token — try again.");
+              if (ok) router.refresh();
             })
           }
         >
           ＋ Generate token
         </Button>
+        <ActionError message={guard.error} className="text-xs text-danger-ink" />
         <p className="text-xs text-ink-faint">
           claude.ai and Claude Desktop connectors need OAuth — scheduled for
           Phase 11. Claude Code works today.

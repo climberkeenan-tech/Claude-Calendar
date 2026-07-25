@@ -60,7 +60,7 @@ export default async function SettingsPage() {
         <CardHeader
           title="Courses"
           action={
-            <Link href="/settings/courses" className="text-xs text-accent hover:underline">
+            <Link href="/settings/courses" className="-my-1 inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline">
               Manage
             </Link>
           }

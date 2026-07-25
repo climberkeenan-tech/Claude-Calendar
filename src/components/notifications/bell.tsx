@@ -65,7 +65,7 @@ export function NotificationBell({ initial }: { initial: BellItem[] }) {
             </p>
             {items.length > 0 ? (
               <button
-                className="text-xs text-accent hover:underline"
+                className="-my-1 inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline"
                 disabled={pending}
                 onClick={() =>
                   startTransition(async () => {

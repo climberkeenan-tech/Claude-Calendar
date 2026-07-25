@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ActionError, useActionGuard } from "@/components/ui/action-error";
 import { startFocusSession, stopFocusSession, type RunningSession } from "@/server/focus";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +37,7 @@ export function StudyTimer({
   const [kind, setKind] = React.useState<(typeof KINDS)[number]["key"]>("study");
   const [courseId, setCourseId] = React.useState("");
   const [pending, startTransition] = React.useTransition();
+  const guard = useActionGuard();
   const [now, setNow] = React.useState(() => new Date());
 
   React.useEffect(() => {
@@ -47,7 +49,8 @@ export function StudyTimer({
   return (
     <Card>
       <CardHeader title="Study timer" />
-      <CardBody>
+      <CardBody className="flex flex-col gap-2">
+        <ActionError message={guard.error} />
         {running ? (
           <div className="flex flex-col items-center gap-3 py-2">
             <p className="font-mono text-4xl tabular-nums text-ink" aria-live="off">
@@ -64,8 +67,11 @@ export function StudyTimer({
               disabled={pending}
               onClick={() =>
                 startTransition(async () => {
-                  await stopFocusSession();
-                  router.refresh();
+                  const ok = await guard.run(
+                    () => stopFocusSession(),
+                    "Couldn't save that session — it's still running, try Stop again.",
+                  );
+                  if (ok) router.refresh();
                 })
               }
             >
@@ -96,7 +102,7 @@ export function StudyTimer({
                 aria-label="Course"
                 value={courseId}
                 onChange={(e) => setCourseId(e.target.value)}
-                className="h-9 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
+                className="h-9 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink"
               >
                 <option value="">No course</option>
                 {courses.map((c) => (
@@ -110,8 +116,11 @@ export function StudyTimer({
               disabled={pending}
               onClick={() =>
                 startTransition(async () => {
-                  await startFocusSession({ kind, courseId: courseId || null });
-                  router.refresh();
+                  const ok = await guard.run(
+                    () => startFocusSession({ kind, courseId: courseId || null }),
+                    "Couldn't start the timer — check your connection.",
+                  );
+                  if (ok) router.refresh();
                 })
               }
             >

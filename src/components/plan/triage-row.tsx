@@ -38,16 +38,16 @@ export function TriageChips({ taskId }: { taskId: string }) {
             })
           }
           className={cn(
-            "rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-ink-muted transition-colors",
+            "min-h-6 rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-ink-muted transition-colors",
             "hover:border-border-strong hover:text-ink disabled:opacity-50",
-            a.key === "drop" && "hover:border-danger hover:text-danger",
+            a.key === "drop" && "hover:border-danger hover:text-danger-ink",
           )}
         >
           {a.label}
         </button>
       ))}
       {error ? (
-        <span role="alert" className="text-[11px] text-danger">
+        <span role="alert" className="text-[11px] text-danger-ink">
           didn&apos;t stick — retry
         </span>
       ) : null}

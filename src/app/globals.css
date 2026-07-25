@@ -9,6 +9,7 @@
   --color-surface-raised: var(--surface-raised);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-border-input: var(--border-input);
   --color-ink: var(--text);
   --color-ink-muted: var(--text-muted);
   --color-ink-faint: var(--text-faint);
@@ -16,11 +17,16 @@
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
   --color-accent-text: var(--accent-text);
+  --color-accent-ink: var(--accent-ink);
   --color-danger: var(--danger);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger-ink: var(--danger-ink);
   --color-danger-soft: var(--danger-soft);
   --color-ok: var(--ok);
+  --color-ok-ink: var(--ok-ink);
   --color-ok-soft: var(--ok-soft);
   --color-warn: var(--warn);
+  --color-warn-ink: var(--warn-ink);
   --color-warn-soft: var(--warn-soft);
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
@@ -53,9 +59,12 @@ body {
   background: var(--accent-soft);
 }
 
-/* Visible, warm focus ring everywhere */
+/* Visible, warm focus ring everywhere. Drawn in --accent-ink, not --accent:
+   the brand terracotta is only 2.96:1 against the light page background, and
+   a focus indicator you can barely see is the one thing keyboard users cannot
+   work around (WCAG 2.4.11). */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-ink);
   outline-offset: 2px;
   border-radius: 4px;
 }

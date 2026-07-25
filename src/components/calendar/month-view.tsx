@@ -54,7 +54,7 @@ export function MonthView({
           return (
             <div
               key={cell.iso}
-              className={`min-h-24 border-b border-l border-border/60 p-1 ${cell.inMonth ? "" : "bg-bg/60"}`}
+              className={`min-h-28 border-b border-l border-border/60 p-1 ${cell.inMonth ? "" : "bg-bg/60"}`}
             >
               <button
                 onClick={() => onDay(cell.iso)}
@@ -75,12 +75,15 @@ export function MonthView({
                     <button
                       key={`${item.id}-${item.occurrenceDate ?? ""}`}
                       onClick={() => onSelect({ item })}
-                      className="truncate rounded px-1 py-px text-left text-[10px] font-medium leading-tight"
+                      // min-h-6 keeps the chip a real tap target (WCAG 2.5.8);
+                      // the month grid has the vertical room, the week grid
+                      // does not — there a chip's height IS its duration.
+                      className="flex min-h-6 items-center truncate rounded px-1 py-px text-left text-[10px] font-medium leading-tight"
                       style={{
                         backgroundColor: isTask ? "transparent" : bg,
                         color: isTask ? "var(--text)" : contrastText(bg),
                         borderLeft: isTask ? `3px solid ${bg}` : undefined,
-                        opacity: item.completed ? 0.45 : 1,
+                        opacity: item.completed ? 0.75 : 1,
                       }}
                     >
                       {item.title}
@@ -90,7 +93,7 @@ export function MonthView({
                 {extra > 0 ? (
                   <button
                     onClick={() => onDay(cell.iso)}
-                    className="px-1 text-left text-[10px] text-ink-faint hover:text-ink"
+                    className="flex min-h-6 items-center px-1 text-left text-[10px] text-ink-faint hover:text-ink"
                   >
                     +{extra} more
                   </button>

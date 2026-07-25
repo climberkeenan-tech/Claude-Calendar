@@ -128,7 +128,7 @@ export function PlanReview({ context }: { context: PlanContext }) {
               : "Triage what slipped — move, shrink, or drop — then regenerate."}
           </p>
           {context.taskCount > 0 ? (
-            <Link href="/assignments" className="text-sm text-accent hover:underline">
+            <Link href="/assignments" className="text-sm text-accent-ink hover:underline">
               Go to triage →
             </Link>
           ) : null}
@@ -144,7 +144,7 @@ export function PlanReview({ context }: { context: PlanContext }) {
         Blocks keep a {context.prefs.bufferMinutes}-minute buffer around
         commitments, up to {Math.round(context.prefs.maxPlanMinutesPerDay / 60)}h
         of study a day —{" "}
-        <Link href="/settings" className="text-accent hover:underline">
+        <Link href="/settings" className="text-accent-ink underline underline-offset-2">
           adjust
         </Link>
         .
@@ -195,19 +195,24 @@ export function PlanReview({ context }: { context: PlanContext }) {
               return (
                 <label
                   key={index}
-                  className={`flex cursor-pointer items-center gap-3 py-2.5 ${off ? "opacity-45" : ""}`}
+                  className="flex cursor-pointer items-center gap-3 py-2.5"
                 >
                   <input
                     type="checkbox"
                     checked={!off}
                     onChange={() => toggle(index)}
-                    className="size-4 accent-(--accent)"
+                    className="size-5 shrink-0 accent-(--accent)"
                     aria-label={`Include ${p.taskTitle} at ${fmtTime(start)}`}
                   />
-                  <span className="w-28 shrink-0 font-mono text-xs text-ink-muted">
+                  <span className="w-28 shrink-0 font-mono text-xs text-ink-faint">
                     {fmtTime(start)}–{fmtTime(end)}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                  {/* Excluded rows read as excluded through the strike-through
+                      and muted ink — not through opacity, which would drop the
+                      row under AA. */}
+                  <span
+                    className={`min-w-0 flex-1 truncate text-sm ${off ? "text-ink-muted line-through" : "text-ink"}`}
+                  >
                     {p.taskTitle}
                   </span>
                   <span className="shrink-0 text-xs text-ink-faint">{p.minutes}m</span>
@@ -248,11 +253,14 @@ export function PlanReview({ context }: { context: PlanContext }) {
             ))}
             <p className="text-xs text-ink-faint">
               Free a slot, raise the daily cap in{" "}
-              <Link href="/settings" className="text-accent hover:underline">
+              <Link href="/settings" className="text-accent-ink underline underline-offset-2">
                 settings
               </Link>
               , or{" "}
-              <Link href="/assignments" className="text-accent hover:underline">
+              <Link
+                href="/assignments"
+                className="text-accent-ink underline underline-offset-2"
+              >
                 triage what slipped
               </Link>
               .
@@ -262,7 +270,7 @@ export function PlanReview({ context }: { context: PlanContext }) {
       ) : null}
 
       {result?.error ? (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-sm text-danger-ink">
           {result.error}
         </p>
       ) : null}

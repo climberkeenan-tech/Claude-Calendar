@@ -14,7 +14,7 @@ export default async function CoursesPage() {
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
       <div className="flex items-baseline justify-between">
         <h1 className="font-display text-2xl text-ink">Courses</h1>
-        <Link href="/settings" className="text-xs text-accent hover:underline">
+        <Link href="/settings" className="-my-1 inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline">
           ← Settings
         </Link>
       </div>

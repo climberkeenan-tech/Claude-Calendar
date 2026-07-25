@@ -44,7 +44,7 @@ export function Suggestions({
           const start = new Date(s.startIso);
           return (
             <div key={i} className="flex items-start gap-3 py-3">
-              <span aria-hidden className="mt-0.5 text-base text-accent">
+              <span aria-hidden className="mt-0.5 text-base text-accent-ink">
                 {ICON[s.kind] ?? "✦"}
               </span>
               <div className="min-w-0 flex-1">
@@ -90,7 +90,7 @@ export function Suggestions({
           );
         })}
         {error ? (
-          <p role="alert" className="pt-2 text-xs text-danger">
+          <p role="alert" className="pt-2 text-xs text-danger-ink">
             {error}
           </p>
         ) : null}

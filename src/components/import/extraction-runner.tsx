@@ -61,11 +61,11 @@ export function ExtractionRunner({
       <CardBody className="flex flex-col items-center gap-3 py-12 text-center">
         {error ? (
           <>
-            <p className="text-sm font-medium text-danger">{error}</p>
+            <p className="text-sm font-medium text-danger-ink">{error}</p>
             <button
               type="button"
               onClick={() => router.refresh()}
-              className="text-sm text-accent hover:underline"
+              className="text-sm text-accent-ink hover:underline"
             >
               Refresh
             </button>

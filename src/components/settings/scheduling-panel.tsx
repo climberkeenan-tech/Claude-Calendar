@@ -98,7 +98,7 @@ export function SchedulingPanel({
               type="time"
               value={dayStart}
               onChange={(e) => setDayStart(e.target.value)}
-              className="h-10 w-full rounded-(--radius-sm) border border-border bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+              className="h-10 w-full rounded-(--radius-sm) border border-border-input bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
             />
           </Field>
           <Field label="Day ends" htmlFor="sched-end">
@@ -107,7 +107,7 @@ export function SchedulingPanel({
               type="time"
               value={dayEnd}
               onChange={(e) => setDayEnd(e.target.value)}
-              className="h-10 w-full rounded-(--radius-sm) border border-border bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+              className="h-10 w-full rounded-(--radius-sm) border border-border-input bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
             />
           </Field>
         </div>
@@ -144,7 +144,7 @@ export function SchedulingPanel({
         </div>
 
         {error ? (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-sm text-danger-ink">
             {error}
           </p>
         ) : null}

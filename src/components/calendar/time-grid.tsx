@@ -14,6 +14,7 @@ import {
   minutesOfDay,
   shiftDay,
 } from "@/lib/time";
+import { ActionError, useActionGuard } from "@/components/ui/action-error";
 import { moveEvent } from "@/server/calendar";
 import type { SelectedItem } from "./event-dialog";
 
@@ -55,6 +56,7 @@ export function TimeGrid({
   const router = useRouter();
   const gridRef = React.useRef<HTMLDivElement>(null);
   const [drag, setDrag] = React.useState<DragState | null>(null);
+  const guard = useActionGuard();
   const [nowTick, setNowTick] = React.useState(() => new Date());
 
   React.useEffect(() => {
@@ -179,13 +181,17 @@ export function TimeGrid({
       `${pad(Math.floor(d.startMin / 60))}:${pad(d.startMin % 60)}`,
     );
     const endsAt = new Date(startsAt.getTime() + (d.endMin - d.startMin) * 60000);
-    await moveEvent({
-      eventId: d.item.id,
-      occurrenceDate: d.item.occurrenceDate,
-      startsAt,
-      endsAt,
-    });
-    router.refresh();
+    const ok = await guard.run(
+      () =>
+        moveEvent({
+          eventId: d.item.id,
+          occurrenceDate: d.item.occurrenceDate,
+          startsAt,
+          endsAt,
+        }),
+      `Couldn't move “${d.item.title}” — it snapped back. Check your connection.`,
+    );
+    if (ok) router.refresh();
   }
 
   const nowIso = isoOf(nowTick);
@@ -193,6 +199,10 @@ export function TimeGrid({
 
   return (
     <div className="overflow-hidden rounded-(--radius) border border-border bg-surface shadow-soft">
+      <ActionError
+        message={guard.error}
+        className="border-b border-danger/40 bg-danger-soft px-3 py-2 text-xs text-ink"
+      />
       {/* Day headers + all-day row */}
       <div className="grid border-b border-border" style={{ gridTemplateColumns: `3.5rem repeat(${days}, 1fr)` }}>
         <div />
@@ -318,7 +328,7 @@ export function TimeGrid({
                             color: isTask ? "var(--text)" : contrastText(bg),
                             borderLeft: isTask ? `3px solid ${bg}` : undefined,
                             backdropFilter: isTask ? "brightness(0.97)" : undefined,
-                            opacity: item.completed ? 0.45 : 1,
+                            opacity: item.completed ? 0.75 : 1,
                             cursor: "grab",
                           }}
                         >

@@ -19,21 +19,33 @@ export function TodaySchedule({ items, now }: { items: CalendarItem[]; now: Date
           <ul className="flex flex-col gap-0.5">
             {items.map((e) => {
               const past = e.endsAt ? e.endsAt.getTime() < now.getTime() : false;
+              const done = past || e.completed;
               return (
                 <li
                   key={`${e.id}-${e.occurrenceDate ?? ""}`}
-                  className={`flex items-center gap-3 rounded-(--radius-sm) px-2 py-2 ${past || e.completed ? "opacity-50" : ""}`}
+                  // Done/past rows recede via COLOUR, never opacity: dimming
+                  // already-muted text composites it straight through the AA
+                  // floor (2.05:1 measured before this change).
+                  className="flex items-center gap-3 rounded-(--radius-sm) px-2 py-2"
                 >
-                  <span className="w-16 shrink-0 font-mono text-xs text-ink-muted">
+                  <span className="w-16 shrink-0 font-mono text-xs text-ink-faint">
                     {e.allDay ? "all day" : e.startsAt ? fmtTime(e.startsAt) : ""}
                   </span>
-                  {e.categoryColor ? <CategoryDot color={e.categoryColor} /> : <span className="size-2.5" />}
-                  <span className={`min-w-0 flex-1 truncate text-sm text-ink ${e.completed ? "line-through" : ""}`}>
+                  {e.categoryColor ? (
+                    <CategoryDot color={e.categoryColor} dim={done} />
+                  ) : (
+                    <span className="size-2.5" />
+                  )}
+                  <span
+                    className={`min-w-0 flex-1 truncate text-sm ${done ? "text-ink-muted" : "text-ink"} ${e.completed ? "line-through" : ""}`}
+                  >
                     {e.recurring ? "↻ " : ""}
                     {e.title}
                   </span>
                   {e.location ? (
-                    <span className="hidden truncate text-xs text-ink-faint sm:block">{e.location}</span>
+                    <span className="hidden truncate text-xs text-ink-faint sm:block">
+                      {e.location}
+                    </span>
                   ) : null}
                 </li>
               );
@@ -55,11 +67,11 @@ export function Deadlines({ items, now }: { items: CalendarItem[]; now: Date }) 
         title="Upcoming deadlines"
         action={
           slipped > 0 ? (
-            <Link href="/plan?mode=today" className="text-xs text-accent hover:underline">
+            <Link href="/plan?mode=today" className="-my-1 inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline">
               {slipped} slipped — replan
             </Link>
           ) : items.length > 0 ? (
-            <Link href="/plan" className="text-xs text-accent hover:underline">
+            <Link href="/plan" className="-my-1 inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline">
               Plan my week
             </Link>
           ) : null
@@ -80,7 +92,7 @@ export function Deadlines({ items, now }: { items: CalendarItem[]; now: Date }) 
                   <CompleteButton eventId={t.id} title={t.title} />
                   {t.categoryColor ? <CategoryDot color={t.categoryColor} /> : <span className="size-2.5" />}
                   <span className="min-w-0 flex-1 truncate text-sm text-ink">{t.title}</span>
-                  <span className={`shrink-0 font-mono text-xs ${overdue ? "text-danger" : "text-ink-muted"}`}>
+                  <span className={`shrink-0 font-mono text-xs ${overdue ? "text-danger-ink" : "text-ink-muted"}`}>
                     {t.dueAt ? relativeDue(now, t.dueAt) : ""}
                   </span>
                 </li>
@@ -99,7 +111,7 @@ export function InboxZone({ items }: { items: { id: string; title: string }[] })
       <CardHeader
         title={`Inbox${items.length ? ` (${items.length})` : ""}`}
         action={
-          <Link href="/assignments" className="text-xs text-accent hover:underline">
+          <Link href="/assignments" className="-my-1 inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline">
             View all
           </Link>
         }

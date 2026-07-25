@@ -8,8 +8,12 @@ const SHORTCUTS: { keys: string; does: string; phase?: string }[] = [
   { keys: "Q", does: "Quick add — natural language" },
   { keys: "T", does: "Go to today (Dashboard)" },
   { keys: "1 / 2 / 3 / 4", does: "Day · Week · Month · Agenda (on Calendar)" },
-  { keys: "← / →", does: "Previous / next period (on Calendar)" },
+  {
+    keys: "← / →",
+    does: "Previous / next period — or move between chips in a choice group",
+  },
   { keys: "Enter", does: "Open focused event" },
+  { keys: "Tab", does: "Skip to content — the first stop on every page" },
   { keys: "?", does: "This overlay" },
 ];
 

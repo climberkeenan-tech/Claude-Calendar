@@ -31,7 +31,7 @@ export function MiniMonth({
       <CardHeader
         title="Calendar"
         action={
-          <Link href="/calendar" className="text-xs text-accent hover:underline">
+          <Link href="/calendar" className="-my-1 inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline">
             {monthName}
           </Link>
         }

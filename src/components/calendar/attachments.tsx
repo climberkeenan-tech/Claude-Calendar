@@ -77,7 +77,7 @@ export function AttachmentsSection({ eventId }: { eventId: string }) {
           type="button"
           disabled={busy !== null}
           onClick={() => inputRef.current?.click()}
-          className="text-xs text-accent hover:underline disabled:opacity-50"
+          className="-my-1 inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline disabled:opacity-50"
         >
           {busy ? `Uploading ${Math.round(busy.pct)}%…` : "＋ Attach file"}
         </button>
@@ -92,7 +92,7 @@ export function AttachmentsSection({ eventId }: { eventId: string }) {
         }}
       />
       {error ? (
-        <p role="alert" className="text-xs text-danger">
+        <p role="alert" className="text-xs text-danger-ink">
           {error}
         </p>
       ) : null}
@@ -110,7 +110,7 @@ export function AttachmentsSection({ eventId }: { eventId: string }) {
                 href={`/api/files/attachment/${a.id}`}
                 target="_blank"
                 rel="noreferrer"
-                className="min-w-0 flex-1 truncate text-ink underline-offset-2 hover:text-accent hover:underline"
+                className="min-w-0 flex-1 truncate text-ink underline-offset-2 hover:text-accent-ink hover:underline"
               >
                 {a.filename}
               </a>
@@ -120,7 +120,7 @@ export function AttachmentsSection({ eventId }: { eventId: string }) {
               <button
                 type="button"
                 aria-label={`Remove ${a.filename}`}
-                className="shrink-0 text-xs text-ink-faint hover:text-danger"
+                className="shrink-0 text-xs text-ink-faint hover:text-danger-ink"
                 onClick={async () => {
                   const prev = rows;
                   setRows(rows.filter((r) => r.id !== a.id));

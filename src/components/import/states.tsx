@@ -85,7 +85,7 @@ export function ImportApproved({
           Changed your mind? Undo removes exactly what this import created —
           nothing else.
         </p>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        {error ? <p className="text-sm text-danger-ink">{error}</p> : null}
         <div className="flex gap-2">
           <Button size="sm" onClick={() => router.push("/calendar")}>
             View calendar

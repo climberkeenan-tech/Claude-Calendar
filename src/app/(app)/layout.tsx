@@ -23,6 +23,15 @@ export default async function AppLayout({
 
   return (
     <div className="flex min-h-dvh w-full">
+      {/* Seven sidebar links stand between the keyboard and the page on every
+          route. One Tab skips them. */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-(--radius-sm) focus:border focus:border-border-input focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:text-ink focus:shadow-raised"
+      >
+        Skip to content
+      </a>
+
       {/* Sidebar (desktop) */}
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-6 border-r border-border bg-surface px-4 py-6 md:flex">
         <div className="flex items-center gap-2.5 px-2">
@@ -66,7 +75,7 @@ export default async function AppLayout({
             <ThemeToggle initialDark={initialDark} />
           </div>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8">
+        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8">
           {children}
         </main>
       </div>

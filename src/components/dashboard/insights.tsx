@@ -43,7 +43,7 @@ export function InsightsDigest({ initial }: { initial: InsightRow[] }) {
         ) : (
           <ul className="flex flex-col gap-3">
             {error ? (
-              <li role="alert" className="text-xs text-danger">
+              <li role="alert" className="text-xs text-danger-ink">
                 {error}
               </li>
             ) : null}

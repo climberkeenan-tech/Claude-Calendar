@@ -49,7 +49,7 @@ export function MobileTabs() {
   const tabs = items.slice(0, 5);
   return (
     <nav
-      aria-label="Primary"
+      aria-label="Primary, compact"
       className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-surface/95 backdrop-blur md:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
@@ -63,7 +63,7 @@ export function MobileTabs() {
             aria-current={active ? "page" : undefined}
             className={cn(
               "flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium",
-              active ? "text-accent" : "text-ink-faint",
+              active ? "text-accent-ink" : "text-ink-faint",
             )}
           >
             <span aria-hidden className="text-lg leading-none">

@@ -285,6 +285,50 @@ Tokens defined once in `src/styles/tokens.css`, consumed via Tailwind theme:
 - **Keyboard**: `Q` quick add — the one omnibox (no separate ⌘K palette; two summonable text boxes with overlapping jobs is one too many) · `T` today · `1/2/3/4` day/week/month/agenda · `←/→` navigate period · `Space` complete focused item · `?` shortcut overlay.
 - **Accessibility**: Radix primitives, visible focus rings, WCAG AA contrast verified for both themes (including event-chip text over category colors), full keyboard reachability.
 
+### Accessibility, as verified in Phase 10
+
+Terracotta is a mid tone. That one fact drives the token layout: `--accent`
+(`#d97757`) is only 3.12:1 against white and 4.23:1 against the dark surface,
+so it is a **fill and mark colour, never a text colour**, and anything set in
+it as text uses `--accent-ink` instead (a darkened terracotta in light, a
+lightened one in dark). Text that sits *on* an accent fill is `--accent-text`
+= ink, which is the same conclusion `contrastText()` already reached for
+category chips — so buttons and chips finally agree. `--danger`, `--warn`, and
+`--ok` follow the identical fill/ink split.
+
+Three rules fell out of measuring rather than eyeballing:
+
+- **Never dim text with opacity.** `opacity-50` over `--text-muted` composites
+  to 2.05:1. Done, past, and excluded rows recede through colour and
+  strike-through instead; opacity is reserved for decorative marks (the
+  category dot), which are `aria-hidden` anyway.
+- **`--border` is a divider hue, not a control boundary.** At ~1.25:1 it fails
+  WCAG 1.4.11 for anything whose edge is the only thing identifying it, so
+  inputs, selects, and textareas use `--border-input` (≥3:1 on every surface).
+- **The focus ring is drawn in `--accent-ink`**, because `--accent` itself is
+  2.96:1 against the light page — under the 3:1 floor for a focus indicator,
+  and a focus ring is the one affordance a keyboard user cannot work around.
+
+`tests/unit/tokens.test.ts` checks every ink against every surface in both
+themes on each run, so a future palette tweak fails the suite instead of
+shipping. Rendered verification is an axe-core pass (WCAG 2.0/2.1/2.2 A + AA)
+over a fixture page carrying every real surface, run at 390 / 768 / 1280 px in
+both themes: **0 violations**, no horizontal overflow at any width.
+
+Interaction details worth naming: choice groups (`RadioChips` — edit scope,
+import course handling) are one tab stop with arrow-key roving, not N tab
+stops; every page starts with a **Skip to content** link past the seven nav
+links; and every mutation that can fail says so, because a server action that
+throws inside `startTransition` otherwise looks exactly like a click that
+didn't register (`useActionGuard`).
+
+Target sizes meet WCAG 2.2's 24 px minimum, with one deliberate exception:
+**week/day grid chips**, whose height *is* the event's duration — a 15-minute
+block that renders 24 px tall would be lying about the schedule. Month-grid
+chips have no such constraint and are sized to 24 px.
+
+`docs/CLICK-COUNTS.md` is the companion audit for the ≤3-click rule.
+
 ---
 
 ## 11. Syllabus parser

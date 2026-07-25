@@ -8,25 +8,40 @@
   --surface-raised: #ffffff;
   --border: #e8e6e1;
   --border-strong: #d9d6cf;
+  /* Form controls need a boundary you can actually SEE (WCAG 1.4.11, 3:1) —
+     --border is a divider hue and sits at 1.25:1, which no automated checker
+     flags but which makes every input vanish on a bright screen. */
+  --border-input: #8d887f;
 
-  /* Text */
+  /* Text — every value clears 4.5:1 against EVERY surface in this file,
+     including the tinted soft fills (accent/warn/danger/ok), not just --bg.
+     Verified by tests/unit/tokens.test.ts, which fails the build if a future
+     tweak drops any pairing below AA. */
   --text: #1f1e1d;
-  --text-muted: #6b6a67;
-  /* ≥4.5:1 on --bg — the hour gutter and hint text must stay readable */
-  --text-faint: #75736c;
+  --text-muted: #666561;
+  --text-faint: #67655f;
 
-  /* Accent — Claude terracotta */
+  /* Accent — Claude terracotta. The hue never changes; what changes is what
+     sits ON it. Terracotta is a MID tone: white text on it is only 3.12:1, so
+     accent fills carry ink (5.33:1) — the same rule `contrastText()` already
+     applies to category chips. --accent-ink is terracotta darkened enough to
+     be readable AS text on a light surface. */
   --accent: #d97757;
-  --accent-hover: #c96846;
+  --accent-hover: #e08a6d;
   --accent-soft: #f7e9e3;
-  --accent-text: #ffffff;
+  --accent-text: #1f1e1d;
+  --accent-ink: #a04a29;
 
   /* Status */
   --danger: #bf4d43;
+  --danger-solid: #bf4d43;
+  --danger-ink: #a83a30;
   --danger-soft: #f6e5e3;
   --ok: #7d9b76;
+  --ok-ink: #4f6b48;
   --ok-soft: #e9efe7;
   --warn: #c2a87d;
+  --warn-ink: #7a6028;
   --warn-soft: #f4eee1;
 
   /* Category palette (muted, warm, distinguishable) */
@@ -69,22 +84,30 @@
   --surface-raised: #383836;
   --border: #3e3d3a;
   --border-strong: #4c4b47;
+  --border-input: #858279;
 
   --text: #f5f4ef;
-  --text-muted: #a6a39c;
-  /* ≥4.5:1 on dark --bg */
-  --text-faint: #98958c;
+  --text-muted: #aba89f;
+  --text-faint: #adaaa2;
 
   --accent: #d97757;
   --accent-hover: #e08a6d;
   --accent-soft: #453630;
-  --accent-text: #ffffff;
+  --accent-text: #1f1e1d;
+  --accent-ink: #eda07b;
 
+  /* --danger stays the border/marker hue (3.19:1 on the dark surface). The
+     destructive FILL keeps the light red so white text clears AA on it; its
+     boundary comes from the --danger border, not the fill. */
   --danger: #d4685e;
+  --danger-solid: #bf4d43;
+  --danger-ink: #ec9d94;
   --danger-soft: #43302e;
   --ok: #93b28b;
+  --ok-ink: #a3c09b;
   --ok-soft: #333b30;
   --warn: #cfb68e;
+  --warn-ink: #d9c2a0;
   --warn-soft: #403a2d;
 
   /* Charts — same hue family re-stepped for the dark card surface #30302e

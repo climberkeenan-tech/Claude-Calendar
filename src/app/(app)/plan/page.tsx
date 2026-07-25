@@ -23,7 +23,7 @@ export default async function PlanPage({
         </h1>
         <Link
           href={mode === "today" ? "/plan" : "/plan?mode=today"}
-          className="text-sm text-accent hover:underline"
+          className="text-sm text-accent-ink hover:underline"
         >
           {mode === "today" ? "Plan the whole week →" : "Just replan today →"}
         </Link>

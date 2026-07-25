@@ -9,12 +9,18 @@ import type { CalendarItem } from "@/lib/db/queries/calendar";
 import { deleteEvent, editEvent, toggleOccurrence } from "@/server/calendar";
 import { completeEvent } from "@/server/events";
 import { EventDetailsSection } from "./event-details";
+import { RadioChips, type RadioChipOption } from "@/components/ui/radio-chips";
 import { instantFromWallClock, isoDay, timeValue } from "@/lib/time";
-import { cn } from "@/lib/utils";
 
 export type SelectedItem = { item: CalendarItem };
 type Category = { id: string; name: string; color: string };
 type Scope = "single" | "series" | "future";
+
+const SCOPE_OPTIONS: readonly RadioChipOption<Scope>[] = [
+  { value: "single", label: "This one", description: "Only this occurrence" },
+  { value: "future", label: "This & future", description: "This one and everything after it" },
+  { value: "series", label: "Whole series", description: "Every occurrence, past and future" },
+];
 
 // Form values live in the PROFILE timezone, matching what the server stores —
 // editing a 9 AM class from a different timezone must not rewrite it to 6 AM.
@@ -201,30 +207,14 @@ function EventForm({
   return (
     <div className="flex flex-col gap-4">
       {item.recurring ? (
-        <div className="flex gap-1.5" role="radiogroup" aria-label="Apply changes to">
-          {(
-            [
-              ["single", "This one"],
-              ["future", "This & future"],
-              ["series", "Whole series"],
-            ] as [Scope, string][]
-          ).map(([s, label]) => (
-            <button
-              key={s}
-              role="radio"
-              aria-checked={scope === s}
-              onClick={() => setScope(s)}
-              className={cn(
-                "flex-1 rounded-(--radius-sm) border px-2 py-1.5 text-xs font-medium transition-colors",
-                scope === s
-                  ? "border-accent bg-accent-soft text-ink"
-                  : "border-border text-ink-muted hover:border-border-strong",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <RadioChips
+          label="Apply changes to"
+          value={scope}
+          onChange={setScope}
+          className="flex-nowrap"
+          chipClassName="flex-1"
+          options={SCOPE_OPTIONS}
+        />
       ) : null}
 
       <Field label="Title" htmlFor="ed-title">
@@ -277,7 +267,7 @@ function EventForm({
           value={categoryId}
           disabled={item.recurring && scope === "single"}
           onChange={(e) => setCategoryId(e.target.value)}
-          className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink disabled:opacity-50"
+          className="h-10 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink disabled:opacity-50"
         >
           <option value="">None</option>
           {categories.map((c) => (
@@ -315,7 +305,7 @@ function EventForm({
       ) : null}
 
       {error ? (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-sm text-danger-ink">
           {error}
         </p>
       ) : null}

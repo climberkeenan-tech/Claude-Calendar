@@ -267,7 +267,7 @@ export function QuickAdd({ categories }: { categories: Category[] }) {
             ) : null}
 
             {error ? (
-              <p role="alert" className="text-sm text-danger">
+              <p role="alert" className="text-sm text-danger-ink">
                 {error}
               </p>
             ) : null}
@@ -380,7 +380,7 @@ function DetailsEditor({
               };
             });
           }}
-          className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
+          className="h-10 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink"
         >
           <option value="event">Event</option>
           <option value="task">Task (deadline)</option>
@@ -394,7 +394,7 @@ function DetailsEditor({
           onChange={(e) =>
             setDraft((v) => (v ? { ...v, categoryName: e.target.value || null } : v))
           }
-          className="h-10 rounded-(--radius-sm) border border-border bg-surface px-2 text-sm text-ink"
+          className="h-10 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink"
         >
           <option value="">None</option>
           {categories.map((c) => (

@@ -56,7 +56,7 @@ export function NowNext({
                   <CategoryDot color={current.categoryColor} />
                 ) : null}
                 {current.endsAt ? (
-                  <span className="font-mono text-accent">
+                  <span className="font-mono text-accent-ink">
                     {leftLabel(now, current.endsAt)}
                   </span>
                 ) : null}
@@ -89,7 +89,7 @@ export function NowNext({
                 {next.categoryColor ? (
                   <CategoryDot color={next.categoryColor} />
                 ) : null}
-                <span className="font-mono text-accent">
+                <span className="font-mono text-accent-ink">
                   {untilLabel(now, nextAt)}
                 </span>
                 <span>· {fmtTime(nextAt)}</span>

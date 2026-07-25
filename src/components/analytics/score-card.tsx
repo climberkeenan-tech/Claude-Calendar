@@ -40,7 +40,7 @@ export function ScoreCard({
           type="button"
           disabled={pending}
           onClick={() => toggle(true)}
-          className="text-accent underline-offset-2 hover:underline"
+          className="text-accent-ink underline-offset-2 hover:underline"
         >
           Show it again
         </button>
@@ -61,7 +61,7 @@ export function ScoreCard({
             type="button"
             disabled={pending}
             onClick={() => toggle(false)}
-            className="text-xs text-ink-faint hover:text-ink-muted"
+            className="-my-1 inline-flex min-h-6 items-center text-xs text-ink-faint hover:text-ink-muted"
           >
             Hide
           </button>
@@ -72,7 +72,7 @@ export function ScoreCard({
           <ul className="flex flex-col gap-1">
             {view.wins.map((w) => (
               <li key={w} className="flex items-start gap-2 text-sm text-ink">
-                <span aria-hidden className="mt-0.5 text-ok">
+                <span aria-hidden className="mt-0.5 text-ok-ink">
                   ✓
                 </span>
                 {w}
@@ -91,14 +91,14 @@ export function ScoreCard({
           <button
             type="button"
             onClick={() => setShowNumber(true)}
-            className="self-start text-xs text-accent underline-offset-2 hover:underline"
+            className="-my-1 inline-flex min-h-6 items-center self-start text-xs text-accent-ink underline-offset-2 hover:underline"
           >
             Show the number
           </button>
         )}
 
         <details>
-          <summary className="cursor-pointer text-xs text-ink-faint hover:text-ink-muted">
+          <summary className="inline-flex min-h-6 cursor-pointer items-center text-xs text-ink-faint hover:text-ink-muted">
             How this is calculated
           </summary>
           <div className="mt-2 flex flex-col gap-1.5 text-xs text-ink-muted">

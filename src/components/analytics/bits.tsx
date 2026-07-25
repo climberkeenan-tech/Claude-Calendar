@@ -31,7 +31,7 @@ export function StatTile({
       <p className="text-xs font-medium text-ink-muted">{label}</p>
       <p className="text-2xl font-semibold text-ink">{value}</p>
       {delta ? (
-        <p className={cn("text-xs", delta.good ? "text-ok" : "text-ink-faint")}>
+        <p className={cn("text-xs", delta.good ? "text-ok-ink" : "text-ink-faint")}>
           {delta.text}
         </p>
       ) : sub ? (

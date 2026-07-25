@@ -38,12 +38,14 @@ export function CategoryBadge({
   );
 }
 
-export function CategoryDot({ color }: { color: string }) {
+/** `dim` recedes a dot for done/past rows. Safe to fade because it's purely
+ * decorative (aria-hidden) — the same fade on text would break contrast. */
+export function CategoryDot({ color, dim }: { color: string; dim?: boolean }) {
   return (
     <span
       aria-hidden
       className="inline-block size-2.5 shrink-0 rounded-full"
-      style={{ backgroundColor: color }}
+      style={{ backgroundColor: color, opacity: dim ? 0.5 : 1 }}
     />
   );
 }

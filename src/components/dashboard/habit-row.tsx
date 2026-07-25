@@ -2,10 +2,14 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { ActionError, useActionGuard } from "@/components/ui/action-error";
 import { toggleOccurrence } from "@/server/calendar";
 import type { HabitWeek } from "@/lib/db/queries/dashboard";
 import { fmtIsoDay, isoDay, shiftDay } from "@/lib/time";
-import { cn } from "@/lib/utils";
+import { cn, contrastText } from "@/lib/utils";
+
+/** The --ok green, as a literal: contrastText needs a hex, not a var(). */
+const OK_FILL = "#7d9b76";
 
 /**
  * One habit, one week: seven tappable day cells + progress toward the weekly
@@ -21,6 +25,7 @@ export function HabitRow({
 }) {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
+  const guard = useActionGuard();
   // Pure calendar-date arithmetic — no instants, so nothing to mis-bucket.
   const todayIso = isoDay(new Date());
 
@@ -38,7 +43,7 @@ export function HabitRow({
   const met = doneCount >= habit.target;
 
   return (
-    <li className="flex items-center gap-3">
+    <li className="flex flex-wrap items-center gap-3">
       <span className="min-w-0 flex-1 truncate text-sm text-ink">{habit.title}</span>
       <div className="flex items-center gap-1" role="group" aria-label={`${habit.title} days`}>
         {days.map((d) => (
@@ -49,19 +54,30 @@ export function HabitRow({
             aria-label={`${habit.title} on ${d.iso}${d.done ? " — done" : ""}`}
             onClick={() =>
               startTransition(async () => {
-                await toggleOccurrence(habit.id, d.iso, !d.done);
-                router.refresh();
+                const ok = await guard.run(
+                  () => toggleOccurrence(habit.id, d.iso, !d.done),
+                  "Didn't stick — try that day again.",
+                );
+                if (ok) router.refresh();
               })
             }
             className={cn(
               "flex size-6 items-center justify-center rounded-full border text-[10px] font-medium transition-colors",
               d.done
-                ? "border-transparent text-white"
+                ? "border-transparent"
                 : d.future
                   ? "border-border text-ink-faint/50"
-                  : "border-border-strong text-ink-muted hover:border-ok hover:text-ok",
+                  : "border-border-strong text-ink-muted hover:border-ok hover:text-ok-ink",
             )}
-            style={d.done ? { backgroundColor: habit.categoryColor ?? "var(--ok)" } : undefined}
+            style={
+              d.done
+                ? {
+                    backgroundColor: habit.categoryColor ?? OK_FILL,
+                    // White reads at 2.28:1 on the "Work" tan — pick per colour.
+                    color: contrastText(habit.categoryColor ?? OK_FILL),
+                  }
+                : undefined
+            }
           >
             {d.label}
           </button>
@@ -70,11 +86,12 @@ export function HabitRow({
       <span
         className={cn(
           "w-12 shrink-0 text-right font-mono text-xs",
-          met ? "text-ok" : "text-ink-muted",
+          met ? "text-ok-ink" : "text-ink-muted",
         )}
       >
         {doneCount} of {habit.target}
       </span>
+      <ActionError message={guard.error} className="basis-full text-xs text-danger-ink" />
     </li>
   );
 }
