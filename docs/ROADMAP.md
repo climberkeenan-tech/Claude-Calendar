@@ -95,7 +95,7 @@ Each phase below lists its deliverables and the verification checklist that must
 
 ---
 
-## Phase 9 — Smart Time Management
+## Phase 9 — Smart Time Management ✅
 
 **Deliverables:** free/busy engine (`free-time.ts`) with **configurable transition buffers** (default 10–15 min — no back-to-back packing) and location-adjacency warnings; open study-block finder; overload detection; suggestion surfaces: best study time, workout time, sleep consistency, work sessions, break timing — each **one-click accept**; "plan my week" assist proposing a full week's study blocks in one pass; **one-tap "replan today / tomorrow"** — rolls unfinished tasks and un-started blocks forward around existing commitments with a single confirm screen; gentle daily overdue triage ("3 things slipped — move, shrink, or drop?"); MCP `get_free_time` tool added.
 
@@ -103,13 +103,28 @@ Each phase below lists its deliverables and the verification checklist that must
 
 ---
 
-## Phase 10 — User Experience
+## Phase 10 — User Experience ✅
 
 A dedicated friction hunt across everything shipped so far.
 
 **Deliverables:** click-count audit (every common action ≤ 3, measured and listed in the repo); load-time pass (route-level code splitting, calendar window prefetch); transition/animation polish; typography + spacing pass; mobile ergonomics (thumb-reachable primary actions); dark/light parity sweep; shortcut coverage review; empty states and error states everywhere; **timezone consistency pass** — client views currently key dates off the browser's timezone while the server uses the profile timezone (identical while the user is in Eastern time; flagged by the Phase 3 review as latent skew when traveling — unify on the profile timezone end-to-end).
 
 **Verify:** the click-count table published; Lighthouse perf ≥ 90 / a11y ≥ 95 on dashboard + calendar; a full "plan the week on the phone" session performed without touching the laptop.
+
+**Done.** `docs/CLICK-COUNTS.md` publishes the audit — 40 actions traced,
+nothing over three. Timezone: every client view now keys off the profile
+timezone through `@/lib/time`, verified byte-identical from Eastern, Pacific,
+and Tokyo browsers (see ARCHITECTURE §6). Accessibility: 0 axe violations
+(WCAG 2.0/2.1/2.2 A + AA) across light and dark at 390 / 768 / 1280 px, with
+`tests/unit/tokens.test.ts` guarding the palette from here on. Performance:
+chrono and Recharts moved out of the critical path (~200 KB gz), Lighthouse
+100/100/100/100 desktop and 98/100/100/100 mobile on `/login`, 100 desktop /
+95 mobile on a fixture route carrying the dashboard and calendar components.
+
+**Still open for the deployed site:** Lighthouse on `/` and `/calendar`
+themselves, and the "plan the week on the phone" session — both need a live
+database and a real Google sign-in, so they belong to the post-deploy pass in
+Phase 12.
 
 ---
 
