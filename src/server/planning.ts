@@ -11,10 +11,10 @@
  * undoes a whole plan.
  */
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray, like, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, like, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
-import { activityLog, events, reminders } from "@/lib/db/schema";
+import { activityLog, categories, events, reminders } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { fromFloating, isoDayInTz } from "@/lib/tz";
 import { syncJobsForEvent, acknowledgeJobsForEvent } from "@/lib/notifications/scheduler";
@@ -25,6 +25,8 @@ import {
   getBusyBlocks,
   getFocusByHour,
   getPlanTasks,
+  getSchedulingPrefs,
+  localDayKey,
   localHourOf,
   overloadDays,
   shiftIso,
@@ -32,6 +34,7 @@ import {
   type DayFree,
   type OverloadDay,
 } from "@/lib/scheduling/context";
+import { buildSuggestions, type Suggestion } from "@/lib/scheduling/suggestions";
 
 const TZ = "America/New_York";
 const DAY = 86_400_000;
@@ -59,7 +62,18 @@ export type PlanContext = {
   mode: "week" | "today";
   proposals: PlanProposal[];
   taskCount: number;
-  unplaceable: { taskId: string; title: string }[];
+  unplaceable: { taskId: string; title: string; reason: string; missingMinutes: number }[];
+  truncated: { taskId: string; title: string; scheduledMinutes: number }[];
+  suggestions: {
+    kind: string;
+    title: string;
+    rationale: string;
+    startIso: string;
+    minutes: number;
+    eventTitle: string;
+    categoryName: string | null;
+  }[];
+  prefs: { bufferMinutes: number; dayStart: string; dayEnd: string; maxPlanMinutesPerDay: number };
   warnings: { from: string; to: string; gapMinutes: number }[];
   overload: OverloadDay[];
   freeSummary: { dayIso: string; freeMinutes: number }[];
@@ -88,11 +102,41 @@ export async function getPlanContext(
     new Date(`${shiftIso(todayIso, horizon)}T00:00:00Z`),
     TZ,
   );
-  const [busy, allTasks, focusByHour] = await Promise.all([
+  const [busy, allTasks, focusByHour, prefs] = await Promise.all([
     getBusyBlocks(userId, now, rangeEnd),
     getPlanTasks(userId, mode === "week" ? 14 : 3),
     getFocusByHour(userId),
+    getSchedulingPrefs(userId),
   ]);
+
+  // Blocks this user already accepted, so re-planning tops up instead of
+  // double-booking, and day ceilings count what's already there.
+  const existingPlanBlocks = await db
+    .select({
+      sourceId: events.sourceId,
+      startsAt: events.startsAt,
+      endsAt: events.endsAt,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        eq(events.source, "ai_suggestion"),
+        like(events.sourceId, "plan:%"),
+        eq(events.status, "scheduled"),
+        gte(events.endsAt, now),
+      ),
+    );
+  const plannedByTask: Record<string, number> = {};
+  const existingPerDay: Record<string, number> = {};
+  for (const b of existingPlanBlocks) {
+    if (!b.startsAt || !b.endsAt) continue;
+    const mins = Math.round((b.endsAt.getTime() - b.startsAt.getTime()) / 60_000);
+    const taskId = b.sourceId?.split(":")[2];
+    if (taskId) plannedByTask[taskId] = (plannedByTask[taskId] ?? 0) + mins;
+    const day = localDayKey(b.startsAt);
+    existingPerDay[day] = (existingPerDay[day] ?? 0) + mins;
+  }
 
   // Replan mode also rolls forward: stale planned blocks (time passed,
   // never completed) point back at their tasks via sourceId.
@@ -124,7 +168,7 @@ export async function getPlanContext(
       staleTaskIds.includes(t.id),
   );
 
-  const free = freeByDay(busy, todayIso, horizon, now);
+  const free = freeByDay(busy, todayIso, horizon, now, prefs);
   const flatFree = free.flatMap((f) => f.blocks);
 
   // Replanning past-due work: the deadline being behind us must not make
@@ -132,24 +176,51 @@ export async function getPlanContext(
   const planTasks = tasks.map((t) => ({
     ...t,
     dueAt: t.dueAt && t.dueAt < now ? null : t.dueAt,
+    plannedMinutes: plannedByTask[t.id] ?? 0,
   }));
 
-  const proposals = proposeBlocks({
+  const result = proposeBlocks({
     tasks: planTasks,
     free: flatFree,
     now,
     focusByHour,
     hourOf: localHourOf,
+    dayKeyOf: localDayKey,
+    bufferMinutes: prefs.bufferMinutes,
+    maxPerDayMinutes: prefs.maxPlanMinutesPerDay,
+    existingPerDay,
   });
 
-  const placed = new Set(proposals.map((p) => p.taskId));
-  const unplaceable = tasks
-    .filter((t) => !placed.has(t.id))
-    .map((t) => ({ taskId: t.id, title: t.title }));
+  // Suggestion surfaces for today (roadmap: best study time, break timing,
+  // sleep consistency, movement) — each one-click acceptable.
+  const todayFree = free[0]?.blocks ?? [];
+  const habitTitles = await db
+    .select({ title: events.title })
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        eq(events.kind, "habit"),
+        eq(events.status, "scheduled"),
+      ),
+    );
+  const earliestCommitmentHour = busy.length
+    ? Math.min(...busy.map((b) => localHourOf(b.startsAt)))
+    : null;
+  const suggestions: Suggestion[] = buildSuggestions({
+    now,
+    free: todayFree,
+    focusByHour,
+    hourOf: localHourOf,
+    busy: busy.filter((b) => localDayKey(b.startsAt) === todayIso),
+    habitTitles: habitTitles.map((h) => h.title),
+    earliestCommitmentHour,
+    plannedMinutesToday: existingPerDay[todayIso] ?? 0,
+  });
 
   return {
     mode,
-    proposals: proposals.map((p) => ({
+    proposals: result.proposals.map((p) => ({
       taskId: p.taskId,
       taskTitle: p.taskTitle,
       startIso: p.start.toISOString(),
@@ -157,8 +228,24 @@ export async function getPlanContext(
       dayIso: isoDayInTz(p.start, TZ),
     })),
     taskCount: tasks.length,
-    unplaceable,
-    warnings: warningsForRange(busy).slice(0, 5),
+    unplaceable: result.unplaceable.map((u) => ({
+      taskId: u.taskId,
+      title: u.title,
+      reason: u.reason,
+      missingMinutes: u.missingMinutes,
+    })),
+    truncated: result.truncated,
+    suggestions: suggestions.map((s) => ({
+      kind: s.kind,
+      title: s.title,
+      rationale: s.rationale,
+      startIso: s.start.toISOString(),
+      minutes: s.minutes,
+      eventTitle: s.eventTitle,
+      categoryName: s.categoryName,
+    })),
+    prefs,
+    warnings: warningsForRange(busy, prefs.bufferMinutes).slice(0, 5),
     overload: overloadDays(tasks, free),
     freeSummary: free.map((f: DayFree) => ({
       dayIso: f.dayIso,
@@ -167,6 +254,77 @@ export async function getPlanContext(
     focusHint: focusHintFrom(focusByHour),
     staleBlockIds,
   };
+}
+
+// ---------------------------------------------------------------------------
+// One-click suggestion accept
+// ---------------------------------------------------------------------------
+
+const suggestionSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  startIso: z.string().datetime(),
+  minutes: z.number().int().min(10).max(240),
+  categoryName: z.string().max(60).nullable(),
+});
+
+export async function acceptSuggestion(
+  input: z.infer<typeof suggestionSchema>,
+): Promise<{ ok?: boolean; error?: string }> {
+  const userId = await requireUserId();
+  const parsed = suggestionSchema.safeParse(input);
+  if (!parsed.success) return { error: "That suggestion didn't look right." };
+  const v = parsed.data;
+  const start = new Date(v.startIso);
+  const now = new Date();
+  if (start < new Date(now.getTime() - 60_000)) {
+    return { error: "That window has passed — refresh for a fresh suggestion." };
+  }
+  const end = new Date(start.getTime() + v.minutes * 60_000);
+
+  // Same freshness guarantee as the planner: don't drop a block onto
+  // something that got scheduled since the page rendered.
+  const busy = await getBusyBlocks(userId, now, new Date(now.getTime() + 2 * DAY));
+  const clashes = busy.some(
+    (b) => b.startsAt.getTime() < end.getTime() && start.getTime() < b.endsAt.getTime(),
+  );
+  if (clashes) {
+    return { error: "Something else landed in that slot — refresh to see what's open." };
+  }
+
+  let categoryId: string | null = null;
+  if (v.categoryName) {
+    const cat = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(eq(categories.userId, userId), eq(categories.name, v.categoryName)));
+    categoryId = cat[0]?.id ?? null;
+  }
+
+  const id = crypto.randomUUID();
+  await db.insert(events).values({
+    id,
+    userId,
+    title: v.title,
+    kind: "event",
+    categoryId,
+    startsAt: start,
+    endsAt: end,
+    allDay: false,
+    tz: TZ,
+    source: "ai_suggestion",
+    sourceId: `suggestion:${id}`,
+  });
+  await db.insert(activityLog).values({
+    id: crypto.randomUUID(),
+    userId,
+    type: "suggestion_accepted",
+    entityType: "event",
+    entityId: id,
+    data: { title: v.title },
+  });
+  await syncJobsForEvent(id);
+  refresh();
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -227,12 +385,17 @@ export async function acceptPlan(input: unknown): Promise<AcceptResult> {
 
   // Fresh collision check — the calendar may have moved since the proposal.
   const horizon = new Date(now.getTime() + 21 * DAY);
-  const busy = await getBusyBlocks(userId, now, horizon);
+  const [busy, acceptPrefs] = await Promise.all([
+    getBusyBlocks(userId, now, horizon),
+    getSchedulingPrefs(userId),
+  ]);
   const openNow = freeBlocks({
     busy,
     windowStart: now,
     windowEnd: horizon,
-    bufferMinutes: 0, // buffers were applied at proposal time; accept only guards true overlap
+    // Re-check against the SAME buffer the proposal used — accepting must
+    // not quietly place a block flush against a class.
+    bufferMinutes: acceptPrefs.bufferMinutes,
     minBlockMinutes: 1,
   });
 

@@ -8,6 +8,13 @@
       "when": 1784817187775,
       "tag": "0000_closed_thunderbolts",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785017540261,
+      "tag": "0001_sturdy_silver_samurai",
+      "breakpoints": true
     }
   ]
 }

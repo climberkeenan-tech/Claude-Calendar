@@ -14,6 +14,9 @@ export type PlanTask = {
   estimatedMinutes: number | null;
   priority: "low" | "normal" | "high" | "critical";
   categoryName: string | null;
+  /** Minutes already covered by accepted plan blocks — re-running the
+   * planner must top up, never double-book. */
+  plannedMinutes?: number;
 };
 
 export type ProposedBlock = {
@@ -24,6 +27,28 @@ export type ProposedBlock = {
   minutes: number;
 };
 
+export type UnplaceableReason =
+  | "already_planned"
+  | "no_time_before_due"
+  | "no_free_time"
+  | "day_caps_reached";
+
+export type Unplaceable = {
+  taskId: string;
+  title: string;
+  reason: UnplaceableReason;
+  /** Minutes we could not find a home for. */
+  missingMinutes: number;
+};
+
+export type PlanResult = {
+  proposals: ProposedBlock[];
+  unplaceable: Unplaceable[];
+  /** Set when a task's estimate exceeded what one plan may schedule — the
+   * UI says so rather than silently truncating. */
+  truncated: { taskId: string; title: string; scheduledMinutes: number }[];
+};
+
 /** Estimate fallbacks when the user hasn't set one — modest, per category. */
 const DEFAULT_ESTIMATE: Record<string, number> = {
   Exams: 120, // studying for it
@@ -31,11 +56,7 @@ const DEFAULT_ESTIMATE: Record<string, number> = {
   Classes: 45, // readings / prep
 };
 export function effectiveEstimate(t: PlanTask): number {
-  return (
-    t.estimatedMinutes ??
-    DEFAULT_ESTIMATE[t.categoryName ?? ""] ??
-    45
-  );
+  return t.estimatedMinutes ?? DEFAULT_ESTIMATE[t.categoryName ?? ""] ?? 45;
 }
 
 /** Split an estimate into sittable sessions (25–90 min, ADHD-sized). */
@@ -67,69 +88,129 @@ export function hourPreference(focusByHour: number[] | null): number[] {
   );
 }
 
-type Slot = { start: number; end: number }; // epoch ms, mutable remainder
+type Slot = { start: number; end: number };
 
-/**
- * Greedy proposal: highest-priority work first, each chunk placed in the
- * best free slot that still respects the due date (finish BEFORE the thing
- * is due, never after) and the learned focus hours.
- */
-export function proposeBlocks(opts: {
+export type PlanOptions = {
   tasks: PlanTask[];
   free: FreeBlock[];
   now: Date;
   focusByHour?: number[] | null;
-  /** Hour extractor so callers control the timezone mapping (tests pass a
-   * UTC-hour fn; production passes an America/New_York one). */
+  /** Hour extractor so callers own the timezone mapping. */
   hourOf: (d: Date) => number;
+  /** Local day key, likewise — used for day caps and spreading. */
+  dayKeyOf: (d: Date) => string;
+  /** Breather between a planned block and whatever comes next. */
+  bufferMinutes?: number;
+  /** Don't propose anything starting sooner than this (no ambush blocks). */
+  minLeadMinutes?: number;
+  /** Ceiling on planned study minutes per local day. */
+  maxPerDayMinutes?: number;
   maxBlocksPerTask?: number;
-}): ProposedBlock[] {
+  /** Minutes already planned per local day (existing accepted blocks). */
+  existingPerDay?: Record<string, number>;
+};
+
+/**
+ * Greedy proposal: highest-priority work first, each chunk placed in the
+ * best free slot that still respects the due date (finish BEFORE the thing
+ * is due), the day's ceiling, and the learned focus hours — spreading a
+ * task's sittings across days rather than cramming them into one evening.
+ */
+export function proposeBlocks(opts: PlanOptions): PlanResult {
   const pref = hourPreference(opts.focusByHour ?? null);
-  const nowMs = opts.now.getTime();
+  const buffer = (opts.bufferMinutes ?? 15) * 60_000;
+  const leadMs = (opts.minLeadMinutes ?? 30) * 60_000;
+  const perDayCap = opts.maxPerDayMinutes ?? 240;
+  const maxBlocks = opts.maxBlocksPerTask ?? 4;
+  const earliest = opts.now.getTime() + leadMs;
   const MIN = 60_000;
 
-  // Priority order — same engine as the Assignments page.
   const ordered = [...opts.tasks].sort(
     (a, b) =>
       priorityScore(
-        { dueAt: b.dueAt, priority: b.priority, estimatedMinutes: b.estimatedMinutes, categoryName: b.categoryName },
+        {
+          dueAt: b.dueAt,
+          priority: b.priority,
+          estimatedMinutes: b.estimatedMinutes,
+          categoryName: b.categoryName,
+        },
         opts.now,
       ) -
       priorityScore(
-        { dueAt: a.dueAt, priority: a.priority, estimatedMinutes: a.estimatedMinutes, categoryName: a.categoryName },
+        {
+          dueAt: a.dueAt,
+          priority: a.priority,
+          estimatedMinutes: a.estimatedMinutes,
+          categoryName: a.categoryName,
+        },
         opts.now,
       ),
   );
 
-  // Mutable copies of the free blocks; chunks carve pieces off them.
   const slots: Slot[] = opts.free
-    .map((f) => ({ start: Math.max(f.start.getTime(), nowMs), end: f.end.getTime() }))
+    .map((f) => ({ start: Math.max(f.start.getTime(), earliest), end: f.end.getTime() }))
     .filter((s) => s.end - s.start >= 25 * MIN)
     .sort((a, b) => a.start - b.start);
 
+  const perDay: Record<string, number> = { ...(opts.existingPerDay ?? {}) };
   const proposals: ProposedBlock[] = [];
+  const unplaceable: Unplaceable[] = [];
+  const truncated: PlanResult["truncated"] = [];
 
   for (const task of ordered) {
-    const chunks = chunkMinutes(effectiveEstimate(task)).slice(
-      0,
-      opts.maxBlocksPerTask ?? 4,
-    );
+    const estimate = effectiveEstimate(task);
+    const remaining = estimate - (task.plannedMinutes ?? 0);
+    if (remaining < 25) {
+      // Already covered by blocks the user accepted earlier — top-up only.
+      if ((task.plannedMinutes ?? 0) > 0) {
+        unplaceable.push({
+          taskId: task.id,
+          title: task.title,
+          reason: "already_planned",
+          missingMinutes: 0,
+        });
+      }
+      continue;
+    }
+
+    const allChunks = chunkMinutes(remaining);
+    const chunks = allChunks.slice(0, maxBlocks);
+    if (chunks.length < allChunks.length) {
+      truncated.push({
+        taskId: task.id,
+        title: task.title,
+        scheduledMinutes: chunks.reduce((a, b) => a + b, 0),
+      });
+    }
+
     const dueMs = task.dueAt?.getTime() ?? Infinity;
+    const daysUsed = new Set<string>();
+    let missing = 0;
+    let hadRoomSomewhere = false;
 
     for (const chunk of chunks) {
       const need = chunk * MIN;
-      // Candidates: slots that fit the chunk and end before the deadline.
-      let best: { slot: Slot; score: number } | null = null;
+      let best: { slot: Slot; score: number; day: string } | null = null;
+
       for (const slot of slots) {
         if (slot.end - slot.start < need) continue;
-        if (slot.start + need > dueMs) continue; // would finish after due
+        if (slot.start + need > dueMs) continue; // must finish before it's due
+        hadRoomSomewhere = true;
+        const day = opts.dayKeyOf(new Date(slot.start));
+        if ((perDay[day] ?? 0) + chunk > perDayCap) continue; // day is full
         const hour = opts.hourOf(new Date(slot.start));
-        // Earlier days win slightly (start early), preferred hours win more.
-        const daysOut = (slot.start - nowMs) / 86_400_000;
-        const score = pref[hour] * 2 - daysOut * 0.15;
-        if (!best || score > best.score) best = { slot, score };
+        const daysOut = (slot.start - opts.now.getTime()) / 86_400_000;
+        // Prefer good hours, earlier days, and — importantly — a day this
+        // task isn't already sitting on, so long work spreads out.
+        const spreadPenalty = daysUsed.has(day) ? 1.2 : 0;
+        const score = pref[hour] * 2 - daysOut * 0.15 - spreadPenalty;
+        if (!best || score > best.score) best = { slot, score, day };
       }
-      if (!best) continue; // nothing fits before the deadline — surfaced as overload elsewhere
+
+      if (!best) {
+        missing += chunk;
+        continue;
+      }
 
       const start = best.slot.start;
       const end = start + need;
@@ -140,10 +221,29 @@ export function proposeBlocks(opts: {
         end: new Date(end),
         minutes: chunk,
       });
-      // Consume the slot front + a 15-minute breather before whatever's next.
-      best.slot.start = end + 15 * MIN;
+      perDay[best.day] = (perDay[best.day] ?? 0) + chunk;
+      daysUsed.add(best.day);
+      best.slot.start = end + buffer; // breather before whatever's next
+    }
+
+    if (missing > 0) {
+      unplaceable.push({
+        taskId: task.id,
+        title: task.title,
+        reason:
+          slots.length === 0
+            ? "no_free_time"
+            : hadRoomSomewhere
+              ? "day_caps_reached"
+              : "no_time_before_due",
+        missingMinutes: missing,
+      });
     }
   }
 
-  return proposals.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return {
+    proposals: proposals.sort((a, b) => a.start.getTime() - b.start.getTime()),
+    unplaceable,
+    truncated,
+  };
 }

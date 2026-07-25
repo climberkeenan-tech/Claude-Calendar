@@ -4,7 +4,7 @@
  */
 import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { categories, events, userPatterns } from "@/lib/db/schema";
+import { categories, events, userPatterns, userSettings } from "@/lib/db/schema";
 import { getCalendarWindow } from "@/lib/db/queries/calendar";
 import { fromFloating, isoDayInTz } from "@/lib/tz";
 import type { UserPatterns } from "@/lib/analytics/patterns";
@@ -34,10 +34,57 @@ export const shiftIso = (dayIso: string, days: number): string =>
     .toISOString()
     .slice(0, 10);
 
-export function wakeWindow(dayIso: string): { start: Date; end: Date } {
+/** Scheduling preferences — configurable per the roadmap, with the same
+ * defaults the schema carries. */
+export type SchedulingPrefs = {
+  bufferMinutes: number;
+  dayStart: string; // "HH:MM"
+  dayEnd: string;
+  maxPlanMinutesPerDay: number;
+};
+
+export const DEFAULT_PREFS: SchedulingPrefs = {
+  bufferMinutes: 15,
+  dayStart: "08:00",
+  dayEnd: "22:00",
+  maxPlanMinutesPerDay: 240,
+};
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export async function getSchedulingPrefs(
+  userId: string,
+): Promise<SchedulingPrefs> {
+  const rows = await db
+    .select({
+      bufferMinutes: userSettings.transitionBufferMinutes,
+      dayStart: userSettings.dayStart,
+      dayEnd: userSettings.dayEnd,
+      maxPlanMinutesPerDay: userSettings.maxPlanMinutesPerDay,
+    })
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId));
+  const r = rows[0];
+  if (!r) return DEFAULT_PREFS;
+  // Defend the engine against a hand-edited row: a malformed window would
+  // silently produce zero free time.
+  const start = HHMM.test(r.dayStart) ? r.dayStart : DEFAULT_PREFS.dayStart;
+  const end = HHMM.test(r.dayEnd) ? r.dayEnd : DEFAULT_PREFS.dayEnd;
   return {
-    start: fromFloating(new Date(`${dayIso}T08:00:00Z`), TZ),
-    end: fromFloating(new Date(`${dayIso}T22:00:00Z`), TZ),
+    bufferMinutes: Math.min(60, Math.max(0, r.bufferMinutes)),
+    dayStart: end > start ? start : DEFAULT_PREFS.dayStart,
+    dayEnd: end > start ? end : DEFAULT_PREFS.dayEnd,
+    maxPlanMinutesPerDay: Math.min(720, Math.max(30, r.maxPlanMinutesPerDay)),
+  };
+}
+
+export function wakeWindow(
+  dayIso: string,
+  prefs: SchedulingPrefs = DEFAULT_PREFS,
+): { start: Date; end: Date } {
+  return {
+    start: fromFloating(new Date(`${dayIso}T${prefs.dayStart}:00Z`), TZ),
+    end: fromFloating(new Date(`${dayIso}T${prefs.dayEnd}:00Z`), TZ),
   };
 }
 
@@ -78,11 +125,12 @@ export function freeByDay(
   startDayIso: string,
   dayCount: number,
   now: Date,
+  prefs: SchedulingPrefs = DEFAULT_PREFS,
 ): DayFree[] {
   const out: DayFree[] = [];
   for (let i = 0; i < dayCount; i++) {
     const dayIso = shiftIso(startDayIso, i);
-    const win = wakeWindow(dayIso);
+    const win = wakeWindow(dayIso, prefs);
     const windowStart = win.start.getTime() < now.getTime() ? now : win.start;
     if (win.end <= windowStart) {
       out.push({ dayIso, blocks: [], freeMinutes: 0 });
@@ -92,6 +140,7 @@ export function freeByDay(
       busy,
       windowStart,
       windowEnd: win.end,
+      bufferMinutes: prefs.bufferMinutes,
     });
     out.push({
       dayIso,
@@ -175,6 +224,12 @@ export function overloadDays(
 
 export type WarningsByDay = ReturnType<typeof adjacencyWarnings>;
 
-export function warningsForRange(busy: BusyBlock[]): WarningsByDay {
-  return adjacencyWarnings(busy);
+export function warningsForRange(
+  busy: BusyBlock[],
+  bufferMinutes: number = DEFAULT_PREFS.bufferMinutes,
+): WarningsByDay {
+  return adjacencyWarnings(busy, bufferMinutes);
 }
+
+/** Local day key (America/New_York) — day caps and spreading key on this. */
+export const localDayKey = (d: Date): string => isoDayInTz(d, TZ);

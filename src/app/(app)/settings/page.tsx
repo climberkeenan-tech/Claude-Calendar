@@ -5,7 +5,10 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { NotificationsPanel } from "@/components/settings/notifications-panel";
 import { ClaudeAccess } from "@/components/settings/claude-access";
+import { SchedulingPanel } from "@/components/settings/scheduling-panel";
 import { listApiTokens } from "@/server/tokens";
+import { getSchedulingPrefs } from "@/lib/scheduling/context";
+import { requireUserId } from "@/lib/auth";
 import {
   countPushSubscriptions,
   getNotificationSettings,
@@ -18,10 +21,12 @@ export const metadata = { title: "Settings" };
 export default async function SettingsPage() {
   const session = await auth();
   const initialDark = (await cookies()).get("theme")?.value === "dark";
-  const [notifSettings, pushDevices, tokens] = await Promise.all([
+  const userId = await requireUserId();
+  const [notifSettings, pushDevices, tokens, schedPrefs] = await Promise.all([
     getNotificationSettings(),
     countPushSubscriptions(),
     listApiTokens(),
+    getSchedulingPrefs(userId),
   ]);
   const appUrl =
     process.env.APP_URL ??
@@ -67,6 +72,8 @@ export default async function SettingsPage() {
           </p>
         </CardBody>
       </Card>
+
+      <SchedulingPanel initial={schedPrefs} />
 
       {notifSettings ? (
         <NotificationsPanel initial={notifSettings} pushDevices={pushDevices} />

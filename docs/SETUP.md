@@ -54,7 +54,7 @@ npm install
 DATABASE_URL="<your Neon connection string>" npm run db:migrate
 ```
 
-This applies the checked-in SQL migration (the same one verified against Postgres 16 in CI/dev).
+This applies every checked-in SQL migration in order (all verified against Postgres 16 in dev). Re-run this same command after pulling any future update that adds a migration — it only applies what's missing.
 
 ## 6. Sign in
 

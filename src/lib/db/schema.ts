@@ -99,6 +99,18 @@ export const userSettings = pgTable("user_settings", {
     .default({ inApp: true, push: true, email: true, sms: false }),
   escalationEnabled: boolean("escalation_enabled").notNull().default(true),
   focusTargetMinutesPerDay: integer("focus_target_minutes_per_day"),
+  // Scheduling preferences (Phase 9). Buffers are configurable per the
+  // roadmap — 15 min suits a walkable campus, 5 suits a dorm desk.
+  transitionBufferMinutes: integer("transition_buffer_minutes")
+    .notNull()
+    .default(15),
+  dayStart: text("day_start").notNull().default("08:00"),
+  dayEnd: text("day_end").notNull().default("22:00"),
+  /** Ceiling on planned study minutes per day — stops "plan my week" from
+   * paving over every waking hour. */
+  maxPlanMinutesPerDay: integer("max_plan_minutes_per_day")
+    .notNull()
+    .default(240),
   showProductivityScore: boolean("show_productivity_score")
     .notNull()
     .default(true),

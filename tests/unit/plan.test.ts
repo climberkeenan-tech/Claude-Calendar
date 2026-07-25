@@ -10,6 +10,7 @@ import type { FreeBlock } from "@/lib/scheduling/free-time";
 
 const at = (day: number, h: number, m = 0) => new Date(Date.UTC(2026, 8, day, h, m));
 const hourOf = (d: Date) => d.getUTCHours();
+const dayKeyOf = (d: Date) => d.toISOString().slice(0, 10);
 const now = at(14, 8); // Sep 14, 08:00
 
 const fb = (day: number, h1: number, h2: number): FreeBlock => ({
@@ -48,7 +49,8 @@ describe("proposeBlocks", () => {
       free: [fb(15, 10, 12)],
       now,
       hourOf,
-    });
+      dayKeyOf,
+    }).proposals;
     expect(props).toHaveLength(1);
     expect(props[0].start.getTime()).toBeGreaterThanOrEqual(at(15, 10).getTime());
     expect(props[0].end.getTime()).toBeLessThanOrEqual(at(15, 12).getTime());
@@ -62,7 +64,8 @@ describe("proposeBlocks", () => {
       free: [fb(15, 14, 18), fb(17, 14, 18)], // Tue afternoon, Thu afternoon
       now,
       hourOf,
-    });
+      dayKeyOf,
+    }).proposals;
     expect(props).toHaveLength(1);
     expect(props[0].end.getTime()).toBeLessThanOrEqual(at(16, 9).getTime());
   });
@@ -83,7 +86,8 @@ describe("proposeBlocks", () => {
       free: [fb(15, 15, 17)], // ONE afternoon block, 120 min
       now,
       hourOf,
-    });
+      dayKeyOf,
+    }).proposals;
     // The exam gets the slot; the reading can't fit after it + breather.
     expect(props.map((p) => p.taskId)).toEqual(["exam"]);
   });
@@ -94,7 +98,8 @@ describe("proposeBlocks", () => {
       free: [fb(15, 12, 19)],
       now,
       hourOf,
-    });
+      dayKeyOf,
+    }).proposals;
     expect(props).toHaveLength(2);
     const [a, b] = props;
     expect(b.start.getTime() - a.end.getTime()).toBeGreaterThanOrEqual(15 * 60_000);
@@ -107,8 +112,9 @@ describe("proposeBlocks", () => {
       free: [fb(15, 9, 11), fb(15, 20, 22)],
       now,
       hourOf,
+      dayKeyOf,
       focusByHour: eveningFocus,
-    });
+    }).proposals;
     expect(props[0].start.getTime()).toBe(at(15, 20).getTime());
   });
 
@@ -123,7 +129,8 @@ describe("proposeBlocks", () => {
       free: [fb(14, 19, 22), fb(15, 18, 22)],
       now: at(14, 18, 30),
       hourOf,
-    });
+      dayKeyOf,
+    }).proposals;
     // Everything scheduled, nothing overlaps, all before due.
     expect(props).toHaveLength(3);
     const sorted = [...props].sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -144,7 +151,8 @@ describe("proposeBlocks", () => {
       free: [fb(15, 10, 12)],
       now,
       hourOf,
-    });
+      dayKeyOf,
+    }).proposals;
     expect(props).toEqual([]);
   });
 });
@@ -155,5 +163,132 @@ describe("hourPreference", () => {
     expect(learned[16]).toBe(1);
     const fallback = hourPreference(null);
     expect(fallback[16]).toBeGreaterThan(fallback[3]);
+  });
+});
+
+describe("proposeBlocks — the quality rules that make Accept trustworthy", () => {
+  it("re-planning tops up instead of double-booking what's already planned", () => {
+    const already = proposeBlocks({
+      tasks: [task({ id: "paper", estimatedMinutes: 180, plannedMinutes: 180 })],
+      free: [fb(15, 12, 20)],
+      now,
+      hourOf,
+      dayKeyOf,
+    });
+    expect(already.proposals).toEqual([]);
+    expect(already.unplaceable[0].reason).toBe("already_planned");
+
+    const partial = proposeBlocks({
+      tasks: [task({ id: "paper", estimatedMinutes: 180, plannedMinutes: 90 })],
+      free: [fb(15, 12, 20)],
+      now,
+      hourOf,
+      dayKeyOf,
+    });
+    // Only the remaining 90 minutes get scheduled.
+    expect(partial.proposals.reduce((a, p) => a + p.minutes, 0)).toBe(90);
+  });
+
+  it("spreads a long task across days instead of cramming one evening", () => {
+    const { proposals } = proposeBlocks({
+      tasks: [task({ id: "thesis", estimatedMinutes: 180 })],
+      free: [fb(15, 12, 20), fb(16, 12, 20)],
+      now,
+      hourOf,
+      dayKeyOf,
+    });
+    const days = new Set(proposals.map((p) => dayKeyOf(p.start)));
+    expect(proposals).toHaveLength(2);
+    expect(days.size).toBe(2);
+  });
+
+  it("honors the per-day ceiling and says which days filled up", () => {
+    const { proposals, unplaceable } = proposeBlocks({
+      tasks: [
+        task({ id: "a", estimatedMinutes: 90, dueAt: at(16, 9) }),
+        task({ id: "b", estimatedMinutes: 90, dueAt: at(16, 9) }),
+      ],
+      free: [fb(15, 9, 20)], // plenty of room…
+      now,
+      hourOf,
+      dayKeyOf,
+      maxPerDayMinutes: 90, // …but only 90 minutes may be planned that day
+    });
+    expect(proposals.reduce((a, p) => a + p.minutes, 0)).toBe(90);
+    expect(unplaceable[0].reason).toBe("day_caps_reached");
+    expect(unplaceable[0].missingMinutes).toBe(90);
+  });
+
+  it("respects minutes already planned on a day from earlier accepts", () => {
+    const { proposals } = proposeBlocks({
+      tasks: [task({ id: "a", estimatedMinutes: 90 })],
+      free: [fb(15, 9, 20)],
+      now,
+      hourOf,
+      dayKeyOf,
+      maxPerDayMinutes: 120,
+      existingPerDay: { "2026-09-15": 60 }, // only 60 left
+    });
+    expect(proposals).toEqual([]);
+  });
+
+  it("never proposes an ambush block starting in the next few minutes", () => {
+    const { proposals } = proposeBlocks({
+      tasks: [task({ id: "a", estimatedMinutes: 30 })],
+      free: [{ start: at(14, 8, 5), end: at(14, 12), minutes: 235 }],
+      now: at(14, 8),
+      hourOf,
+      dayKeyOf,
+      minLeadMinutes: 30,
+    });
+    expect(proposals[0].start.getTime()).toBeGreaterThanOrEqual(at(14, 8, 30).getTime());
+  });
+
+  it("uses the configured buffer between a task's own sittings", () => {
+    const { proposals } = proposeBlocks({
+      tasks: [task({ id: "p", estimatedMinutes: 180 })],
+      free: [fb(15, 12, 19)],
+      now,
+      hourOf,
+      dayKeyOf,
+      bufferMinutes: 45,
+    });
+    expect(proposals[1].start.getTime() - proposals[0].end.getTime()).toBeGreaterThanOrEqual(
+      45 * 60_000,
+    );
+  });
+
+  it("says so when an estimate is too big for one plan (never silently truncates)", () => {
+    const { truncated } = proposeBlocks({
+      tasks: [task({ id: "huge", estimatedMinutes: 600 })], // 7 chunks
+      free: [fb(15, 8, 22), fb(16, 8, 22), fb(17, 8, 22)],
+      now,
+      hourOf,
+      dayKeyOf,
+      maxBlocksPerTask: 4,
+      maxPerDayMinutes: 600,
+    });
+    expect(truncated).toHaveLength(1);
+    expect(truncated[0].taskId).toBe("huge");
+  });
+
+  it("distinguishes 'no time before due' from 'no free time at all'", () => {
+    const noRoom = proposeBlocks({
+      tasks: [task({ id: "x", estimatedMinutes: 60, dueAt: at(14, 9) })],
+      free: [fb(15, 10, 12)],
+      now,
+      hourOf,
+      dayKeyOf,
+    });
+    expect(noRoom.unplaceable[0].reason).toBe("no_time_before_due");
+
+    const empty = proposeBlocks({
+      tasks: [task({ id: "x", estimatedMinutes: 60 })],
+      free: [],
+      now,
+      hourOf,
+      dayKeyOf,
+    });
+    expect(empty.unplaceable[0].reason).toBe("no_free_time");
   });
 });

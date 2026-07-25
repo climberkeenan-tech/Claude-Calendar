@@ -18,6 +18,22 @@ import {
   type PlanContext,
 } from "@/server/planning";
 
+/** Plain-language "why not" — never a dead end without a next move. */
+const REASON: Record<string, string> = {
+  already_planned: "already has blocks on the calendar",
+  no_time_before_due: "no open slot before it's due",
+  no_free_time: "nothing free in this window",
+  day_caps_reached: "the days it could go on hit your daily study cap",
+};
+
+/** "1h 30m" — never "90m" for something over an hour. */
+function fmtDuration(mins: number): string {
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 const dayLabel = (iso: string) =>
   new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", {
     weekday: "long",
@@ -40,6 +56,9 @@ export function PlanReview({ context }: { context: PlanContext }) {
     byDay.set(p.dayIso, list);
   });
   const acceptedCount = context.proposals.length - rejected.size;
+  const acceptedMinutes = context.proposals
+    .filter((_, i) => !rejected.has(i))
+    .reduce((a, p) => a + p.minutes, 0);
 
   const toggle = (index: number) =>
     setRejected((r) => {
@@ -125,9 +144,16 @@ export function PlanReview({ context }: { context: PlanContext }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {context.focusHint ? (
-        <p className="text-xs text-ink-faint">✦ {context.focusHint}</p>
-      ) : null}
+      <p className="text-xs text-ink-faint">
+        {context.focusHint ? `✦ ${context.focusHint} ` : ""}
+        Blocks keep a {context.prefs.bufferMinutes}-minute buffer around
+        commitments, up to {Math.round(context.prefs.maxPlanMinutesPerDay / 60)}h
+        of study a day —{" "}
+        <Link href="/settings" className="text-accent hover:underline">
+          adjust
+        </Link>
+        .
+      </p>
 
       {context.warnings.length > 0 ? (
         <div className="rounded-(--radius) border border-warn/40 bg-warn-soft p-3 text-sm text-ink">
@@ -140,19 +166,32 @@ export function PlanReview({ context }: { context: PlanContext }) {
       ) : null}
 
       {context.overload.length > 0 ? (
-        <div className="rounded-(--radius) border border-border bg-surface-raised p-3 text-sm text-ink-muted">
+        <div className="flex flex-col gap-1 rounded-(--radius) border border-border-strong bg-surface-raised p-3 text-sm text-ink">
           {context.overload.map((o) => (
             <p key={o.dayIso}>
-              {dayLabel(o.dayIso)} is overloaded: ~{Math.round(o.taskMinutes / 60)}h due,{" "}
-              {Math.round(o.freeMinutes / 60)}h free — start earlier or triage.
+              <span aria-hidden className="mr-1.5 text-ink-muted">◱</span>
+              <span className="font-medium">{dayLabel(o.dayIso)}</span> has more due
+              than it has room: {fmtDuration(o.taskMinutes)} of work,{" "}
+              {fmtDuration(o.freeMinutes)} free. Starting earlier is the fix.
             </p>
           ))}
         </div>
       ) : null}
 
-      {[...byDay.entries()].map(([dayIso, list]) => (
+      {[...byDay.entries()].map(([dayIso, list]) => {
+        const dayMinutes = list
+          .filter(({ index }) => !rejected.has(index))
+          .reduce((a, { p }) => a + p.minutes, 0);
+        return (
         <Card key={dayIso}>
-          <CardHeader title={dayLabel(dayIso)} />
+          <CardHeader
+            title={dayLabel(dayIso)}
+            action={
+              <span className="font-mono text-xs text-ink-faint">
+                {dayMinutes > 0 ? fmtDuration(dayMinutes) : "nothing"}
+              </span>
+            }
+          />
           <CardBody className="flex flex-col divide-y divide-border">
             {list.map(({ index, p }) => {
               const off = rejected.has(index);
@@ -182,17 +221,49 @@ export function PlanReview({ context }: { context: PlanContext }) {
             })}
           </CardBody>
         </Card>
-      ))}
+        );
+      })}
 
-      {context.unplaceable.length > 0 ? (
-        <p className="text-xs text-ink-faint">
-          Couldn&apos;t fit: {context.unplaceable.map((u) => u.title).join(", ")} —
-          free a slot or{" "}
-          <Link href="/assignments" className="text-accent hover:underline">
-            triage
-          </Link>
-          .
-        </p>
+      {context.unplaceable.length > 0 || context.truncated.length > 0 ? (
+        <Card>
+          <CardHeader title="Didn't fit" />
+          <CardBody className="flex flex-col gap-2">
+            {context.unplaceable.map((u) => (
+              <div
+                key={u.taskId}
+                className="flex flex-col gap-0.5 text-sm sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"
+              >
+                <span className="min-w-0 truncate text-ink sm:flex-1">{u.title}</span>
+                <span className="shrink-0 text-xs text-ink-muted">
+                  {REASON[u.reason] ?? "couldn't be placed"}
+                  {u.missingMinutes > 0 ? ` · ${fmtDuration(u.missingMinutes)} unplaced` : ""}
+                </span>
+              </div>
+            ))}
+            {context.truncated.map((t) => (
+              <div
+                key={t.taskId}
+                className="flex flex-col gap-0.5 text-sm sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"
+              >
+                <span className="min-w-0 truncate text-ink sm:flex-1">{t.title}</span>
+                <span className="shrink-0 text-xs text-ink-muted">
+                  big one · planned {fmtDuration(t.scheduledMinutes)} so far
+                </span>
+              </div>
+            ))}
+            <p className="text-xs text-ink-faint">
+              Free a slot, raise the daily cap in{" "}
+              <Link href="/settings" className="text-accent hover:underline">
+                settings
+              </Link>
+              , or{" "}
+              <Link href="/assignments" className="text-accent hover:underline">
+                triage what slipped
+              </Link>
+              .
+            </p>
+          </CardBody>
+        </Card>
       ) : null}
 
       {result?.error ? (
@@ -205,6 +276,7 @@ export function PlanReview({ context }: { context: PlanContext }) {
         <p className="text-sm text-ink-muted">
           <span className="font-medium text-ink">{acceptedCount}</span> block
           {acceptedCount === 1 ? "" : "s"}
+          {acceptedMinutes > 0 ? ` · ${fmtDuration(acceptedMinutes)}` : ""}
           {context.staleBlockIds.length > 0
             ? ` · sweeps ${context.staleBlockIds.length} stale block${context.staleBlockIds.length === 1 ? "" : "s"}`
             : ""}
