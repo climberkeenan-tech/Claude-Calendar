@@ -230,7 +230,11 @@ export async function savePushSubscription(
     })
     .onConflictDoUpdate({
       target: pushSubscriptions.endpoint,
-      set: { keys: v.keys, userAgent },
+      // Reassign ownership: a browser profile reused by a second allowed
+      // account returns the SAME push endpoint. Leaving the old userId meant
+      // the new user got nothing while the old user's reminders — titles and
+      // locations included — kept pushing to a device they'd handed over.
+      set: { userId, keys: v.keys, userAgent },
     });
   revalidatePath("/settings");
 }

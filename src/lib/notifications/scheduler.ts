@@ -22,6 +22,7 @@ import {
 } from "./policy";
 import { dispatch } from "./channels";
 import { cancelCallback, scheduleCallback } from "./qstash";
+import { isoDayInTz } from "@/lib/tz";
 
 /**
  * Re-derive the job set for one event after any change (create, edit, move,
@@ -36,7 +37,19 @@ export async function syncJobsForEvent(eventId: string): Promise<void> {
   const [reminderRows, overrideRows, existing] = await Promise.all([
     db.select().from(reminders).where(eq(reminders.eventId, eventId)),
     db.select().from(occurrences).where(eq(occurrences.eventId, eventId)),
-    db.select().from(notificationJobs).where(eq(notificationJobs.eventId, eventId)),
+    // Escalation jobs have no reminder row behind them, so the diff would
+    // never find a desired counterpart and would cancel every one of them on
+    // the next edit. They're owned entirely by escalation.ts; deliverJob
+    // still re-checks staleness when they fire.
+    db
+      .select()
+      .from(notificationJobs)
+      .where(
+        and(
+          eq(notificationJobs.eventId, eventId),
+          eq(notificationJobs.isEscalation, false),
+        ),
+      ),
   ]);
 
   const now = new Date();
@@ -77,6 +90,7 @@ export async function syncJobsForEvent(eventId: string): Promise<void> {
       channel: e.channel,
       status: e.status,
     })),
+    now,
   );
 
   for (const c of cancel) {
@@ -157,6 +171,8 @@ export async function deliverJob(jobId: string): Promise<DeliverOutcome> {
       location: events.location,
       tz: events.tz,
       rrule: events.rrule,
+      startsAt: events.startsAt,
+      dueAt: events.dueAt,
     })
     .from(events)
     .where(eq(events.id, job.eventId));
@@ -175,8 +191,27 @@ export async function deliverJob(jobId: string): Promise<DeliverOutcome> {
       .where(eq(notificationJobs.id, jobId));
     return "skipped";
   }
+  // The item moved since this job was materialized (its anchor no longer
+  // matches). Overdue jobs now survive re-syncs so the daily sweep can
+  // deliver them — this is what stops a swept job from announcing a time
+  // that no longer exists.
+  if (!event.rrule) {
+    const anchor = event.kind === "task" ? event.dueAt : event.startsAt;
+    if (!anchor || Math.abs(anchor.getTime() - job.occurrenceAt.getTime()) > 60_000) {
+      await db
+        .update(notificationJobs)
+        .set({ status: "cancelled" })
+        .where(eq(notificationJobs.id, jobId));
+      return "skipped";
+    }
+  }
+
   if (event.rrule) {
-    const occIso = job.occurrenceAt.toISOString().slice(0, 10);
+    // Occurrence rows are keyed by the date in the EVENT's timezone. Using
+    // the UTC date silently missed every evening occurrence (8 PM ET is
+    // already tomorrow in UTC), so cancelled/completed evening classes still
+    // got reminders.
+    const occIso = isoDayInTz(job.occurrenceAt, event.tz);
     const occ = await db
       .select()
       .from(occurrences)
@@ -341,6 +376,30 @@ export async function dailyMaintenance(): Promise<{
 }> {
   const now = new Date();
 
+  // Sweep FIRST: anything that slipped past its send time gets its chance
+  // before the re-sync touches the job set. (diffJobs also protects overdue
+  // and deferred jobs now — this ordering is belt and braces.)
+  const overdueFirst = await db
+    .select({ id: notificationJobs.id })
+    .from(notificationJobs)
+    .where(
+      or(
+        and(
+          inArray(notificationJobs.status, ["pending", "deferred"]),
+          lt(notificationJobs.sendAt, new Date(now.getTime() - 5 * 60 * 1000)),
+        ),
+        and(
+          eq(notificationJobs.status, "sending"),
+          lt(notificationJobs.leaseExpiresAt, now),
+        ),
+      ),
+    );
+  let swept = 0;
+  for (const j of overdueFirst) {
+    const outcome = await deliverJob(j.id);
+    if (outcome === "delivered") swept++;
+  }
+
   const eventIds = await db
     .selectDistinct({ eventId: reminders.eventId })
     .from(reminders)
@@ -371,28 +430,6 @@ export async function dailyMaintenance(): Promise<{
         .set({ qstashMessageId: messageId })
         .where(eq(notificationJobs.id, j.id));
     }
-  }
-
-  // Sweep: overdue pendings/deferreds and expired sending leases.
-  const overdue = await db
-    .select({ id: notificationJobs.id })
-    .from(notificationJobs)
-    .where(
-      or(
-        and(
-          inArray(notificationJobs.status, ["pending", "deferred"]),
-          lt(notificationJobs.sendAt, new Date(now.getTime() - 5 * 60 * 1000)),
-        ),
-        and(
-          eq(notificationJobs.status, "sending"),
-          lt(notificationJobs.leaseExpiresAt, now),
-        ),
-      ),
-    );
-  let swept = 0;
-  for (const j of overdue) {
-    const outcome = await deliverJob(j.id);
-    if (outcome === "delivered") swept++;
   }
 
   return { synced: eventIds.length, enqueued: needingAlarm.length, swept };

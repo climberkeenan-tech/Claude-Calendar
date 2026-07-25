@@ -170,9 +170,18 @@ export function TimeGrid({
       return;
     }
     const iso = dayIsos[d.dayIdx];
-    const base = new Date(`${iso}T00:00:00`);
-    const startsAt = new Date(base.getTime() + d.startMin * 60000);
-    const endsAt = new Date(base.getTime() + d.endMin * 60000);
+    // Build the instant from WALL-CLOCK fields, not midnight + elapsed ms:
+    // on DST days the two diverge, and the grid renders wall clock — so an
+    // event dropped on the 10 AM row committed 9 AM and visibly jumped.
+    const [yy, mm, dd] = iso.split("-").map(Number);
+    const startsAt = new Date(
+      yy,
+      mm - 1,
+      dd,
+      Math.floor(d.startMin / 60),
+      d.startMin % 60,
+    );
+    const endsAt = new Date(startsAt.getTime() + (d.endMin - d.startMin) * 60000);
     await moveEvent({
       eventId: d.item.id,
       occurrenceDate: d.item.occurrenceDate,

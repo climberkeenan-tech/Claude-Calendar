@@ -128,6 +128,53 @@ describe("diffJobs", () => {
     expect(create).toEqual([]);
     expect(cancel.map((c) => c.id)).toEqual(["orphan"]);
   });
+
+  it("PROMISE: a quiet-hours deferred job survives every re-sync", () => {
+    // Deferral rewrites sendAt to quiet-hours end; its ORIGINAL send time is
+    // past, so desiredJobs no longer plans it. It must still not be dropped.
+    const deferred = asExisting(desired[0], {
+      id: "deferred-overnight",
+      status: "deferred",
+      occurrenceAt: new Date(now.getTime() - 30 * 60_000),
+      sendAt: new Date(now.getTime() + 4 * 60 * 60 * 1000),
+    });
+    const { create, cancel } = diffJobs(desired, [...desired.map((d) => asExisting(d)), deferred], now);
+    expect(cancel.map((c) => c.id)).not.toContain("deferred-overnight");
+    expect(create).toEqual([]);
+  });
+
+  it("a deferred job matching a desired key is never duplicated", () => {
+    const deferred = desired.map((d, i) =>
+      asExisting(d, {
+        id: `def-${i}`,
+        status: "deferred",
+        sendAt: new Date(d.sendAt.getTime() + 6 * 60 * 60 * 1000),
+      }),
+    );
+    const { create, cancel } = diffJobs(desired, deferred, now);
+    expect(create).toEqual([]);
+    expect(cancel).toEqual([]);
+  });
+
+  it("SAFETY NET: a recently-missed job stays alive for the daily sweep", () => {
+    const missed = asExisting(desired[0], {
+      id: "missed-alarm",
+      sendAt: new Date(now.getTime() - 90 * 60_000), // alarm never fired
+      occurrenceAt: new Date(now.getTime() - 30 * 60_000),
+    });
+    const { cancel } = diffJobs(desired, [missed], now);
+    expect(cancel).toEqual([]);
+  });
+
+  it("but a job overdue by more than a day is finally cancelled", () => {
+    const ancient = asExisting(desired[0], {
+      id: "ancient",
+      sendAt: new Date(now.getTime() - 30 * 60 * 60 * 1000),
+      occurrenceAt: new Date(now.getTime() - 29 * 60 * 60 * 1000),
+    });
+    const { cancel } = diffJobs(desired, [ancient], now);
+    expect(cancel.map((c) => c.id)).toEqual(["ancient"]);
+  });
 });
 
 describe("quietHoursDeferral", () => {

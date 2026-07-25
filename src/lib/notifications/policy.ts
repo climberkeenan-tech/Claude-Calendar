@@ -113,13 +113,29 @@ export function desiredJobs(
 const key = (j: { reminderId: string | null; occurrenceAt: Date; channel: string }) =>
   `${j.reminderId}|${j.occurrenceAt.toISOString()}|${j.channel}`;
 
+/** A job overdue by more than this is past saving — delivering it would be
+ * noise, not a safety net. (The sweep runs daily, so anything older already
+ * had its chance.) */
+export const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Diff desired vs existing. Only pending/deferred jobs are cancellable —
  * anything already sent/acknowledged is history and must be left alone.
+ *
+ * Two classes of live job are deliberately NOT cancellable, because
+ * `desiredJobs` only ever plans the future and would otherwise delete them:
+ *  - **deferred** jobs (quiet hours moved their sendAt on purpose). The
+ *    promise is "reminders wait, never vanish"; cancelling them here made
+ *    the nightly cron shred every overnight deferral.
+ *  - **recently overdue** jobs (a missed alarm). These are exactly what the
+ *    daily sweep exists to deliver; cancelling them first made the sweep
+ *    dead code — and in QStash-less degraded mode, the only delivery path.
+ * Staleness is re-checked at delivery time by deliverJob.
  */
 export function diffJobs(
   desired: DesiredJob[],
   existing: ExistingJob[],
+  now: Date = new Date(),
 ): { create: DesiredJob[]; cancel: ExistingJob[] } {
   const desiredByKey = new Map(desired.map((d) => [key(d), d]));
   const liveExisting = existing.filter(
@@ -130,16 +146,23 @@ export function diffJobs(
   const create: DesiredJob[] = [];
   for (const d of desired) {
     const match = existingByKey.get(key(d));
-    if (!match || Math.abs(match.sendAt.getTime() - d.sendAt.getTime()) > 60_000) {
-      if (!match) create.push(d);
-      else {
-        // send time moved (event rescheduled or offset changed): recreate
-        create.push(d);
-      }
+    if (!match) {
+      create.push(d);
+    } else if (
+      match.status !== "deferred" &&
+      Math.abs(match.sendAt.getTime() - d.sendAt.getTime()) > 60_000
+    ) {
+      // Send time moved (event rescheduled or offset changed): recreate.
+      // A deferred job's sendAt diverges by design — never duplicate it.
+      create.push(d);
     }
   }
+
   const cancel: ExistingJob[] = [];
   for (const e of liveExisting) {
+    if (e.status === "deferred") continue; // waiting out quiet hours
+    const overdueBy = now.getTime() - e.sendAt.getTime();
+    if (overdueBy > 0 && overdueBy <= STALE_AFTER_MS) continue; // sweep's job
     const match = desiredByKey.get(key(e));
     if (!match || Math.abs(match.sendAt.getTime() - e.sendAt.getTime()) > 60_000) {
       cancel.push(e);

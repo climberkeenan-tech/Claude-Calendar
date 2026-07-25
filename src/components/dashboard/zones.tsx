@@ -46,9 +46,25 @@ export function TodaySchedule({ items, now }: { items: CalendarItem[]; now: Date
 }
 
 export function Deadlines({ items, now }: { items: CalendarItem[]; now: Date }) {
+  const slipped = items.filter(
+    (t) => t.dueAt !== null && t.dueAt.getTime() < now.getTime(),
+  ).length;
   return (
     <Card>
-      <CardHeader title="Upcoming deadlines" />
+      <CardHeader
+        title="Upcoming deadlines"
+        action={
+          slipped > 0 ? (
+            <Link href="/plan?mode=today" className="text-xs text-accent hover:underline">
+              {slipped} slipped — replan
+            </Link>
+          ) : items.length > 0 ? (
+            <Link href="/plan" className="text-xs text-accent hover:underline">
+              Plan my week
+            </Link>
+          ) : null
+        }
+      />
       <CardBody>
         {items.length === 0 ? (
           <EmptyState

@@ -8,6 +8,7 @@ import { CompleteButton } from "@/components/dashboard/complete-button";
 import { InboxRow } from "@/components/dashboard/inbox-row";
 import { relativeDue } from "@/lib/time";
 import { sortByPriority } from "@/lib/analytics/priority";
+import { TriageChips } from "@/components/plan/triage-row";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Assignments" };
@@ -75,20 +76,35 @@ export default async function AssignmentsPage() {
             />
           ) : (
             <ul className="flex flex-col divide-y divide-border">
-              {dated.map((t) => (
-                <li key={t.id} className="flex items-center gap-3 py-2.5">
-                  <CompleteButton eventId={t.id} title={t.title} />
-                  {t.categoryColor ? (
-                    <CategoryDot color={t.categoryColor} />
-                  ) : (
-                    <span className="size-2.5" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-sm text-ink">{t.title}</span>
-                  <span className="shrink-0 font-mono text-xs text-ink-muted">
-                    {t.dueAt ? relativeDue(now, t.dueAt) : ""}
-                  </span>
-                </li>
-              ))}
+              {dated.map((t) => {
+                const overdue = t.dueAt !== null && t.dueAt.getTime() < now.getTime();
+                return (
+                  <li key={t.id} className="flex flex-col gap-1.5 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <CompleteButton eventId={t.id} title={t.title} />
+                      {t.categoryColor ? (
+                        <CategoryDot color={t.categoryColor} />
+                      ) : (
+                        <span className="size-2.5" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                        {t.title}
+                      </span>
+                      <span
+                        className={`shrink-0 font-mono text-xs ${overdue ? "text-danger" : "text-ink-muted"}`}
+                      >
+                        {t.dueAt ? relativeDue(now, t.dueAt) : ""}
+                      </span>
+                    </div>
+                    {/* Gentle triage: it slipped, that's fine — what now? */}
+                    {overdue ? (
+                      <div className="pl-8">
+                        <TriageChips taskId={t.id} />
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </CardBody>

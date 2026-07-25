@@ -8,6 +8,12 @@ import { createItemForUser, localToInstant } from "@/lib/items/create";
 import { completeItemForUser } from "@/lib/items/complete";
 import { verifyBearer } from "@/lib/mcp/tokens";
 import { getWeekScore } from "@/lib/analytics/summary";
+import {
+  freeByDay,
+  getBusyBlocks,
+  shiftIso,
+} from "@/lib/scheduling/context";
+import { isoDayInTz } from "@/lib/tz";
 import { dayBounds, fmtShortDay, fmtTime, relativeDue } from "@/lib/time";
 import { syncJobsForEvent } from "@/lib/notifications/scheduler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
@@ -123,12 +129,29 @@ const handler = createMcpHandler(
 
     server.tool(
       "complete_item",
-      "Mark an event or task complete (or un-complete it).",
-      { eventId: z.string(), completed: z.boolean().optional() },
-      async ({ eventId, completed }, { authInfo }) => {
+      "Mark an event or task complete (or un-complete it). For a repeating item this completes ONE occurrence — today's unless occurrenceDate is given.",
+      {
+        eventId: z.string(),
+        completed: z.boolean().optional(),
+        occurrenceDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+      },
+      async ({ eventId, completed, occurrenceDate }, { authInfo }) => {
         const userId = userIdOf(authInfo);
-        const r = await completeItemForUser(userId, eventId, completed ?? true);
-        return text(r.ok ? `Done: "${r.title}"` : "No such item.");
+        const r = await completeItemForUser(
+          userId,
+          eventId,
+          completed ?? true,
+          occurrenceDate,
+        );
+        if (!r.ok) return text("No such item.");
+        return text(
+          r.occurrence
+            ? `Done: "${r.title}" on ${r.occurrence} (that occurrence only — the series continues).`
+            : `Done: "${r.title}"`,
+        );
       },
     );
 
@@ -198,6 +221,31 @@ const handler = createMcpHandler(
             .where(eq(focusSessions.id, s.id));
         }
         return text("Timer stopped and saved.");
+      },
+    );
+
+    server.tool(
+      "get_free_time",
+      "Open blocks over the next N days (default 3), waking hours only, with 15-minute transition buffers already applied — the same engine the in-app planner uses.",
+      { days: z.number().int().min(1).max(14).optional() },
+      async ({ days }, { authInfo }) => {
+        const userId = userIdOf(authInfo);
+        const now = new Date();
+        const span = days ?? 3;
+        const todayIso = isoDayInTz(now, "America/New_York");
+        const rangeEnd = new Date(
+          new Date(`${shiftIso(todayIso, span)}T00:00:00Z`).getTime(),
+        );
+        const busy = await getBusyBlocks(userId, now, rangeEnd);
+        const byDay = freeByDay(busy, todayIso, span, now);
+        const lines = byDay.map((d) => {
+          if (d.blocks.length === 0) return `${d.dayIso}: nothing open.`;
+          const slots = d.blocks
+            .map((b) => `${fmtTime(b.start)}–${fmtTime(b.end)} (${b.minutes}m)`)
+            .join(", ");
+          return `${d.dayIso}: ${slots} — ${d.freeMinutes} min free.`;
+        });
+        return text(lines.join("\n"));
       },
     );
 

@@ -8,6 +8,7 @@ const items = [
   { href: "/", label: "Dashboard", icon: "◈" },
   { href: "/calendar", label: "Calendar", icon: "▦" },
   { href: "/assignments", label: "Assignments", icon: "☰" },
+  { href: "/plan", label: "Plan", icon: "◇" },
   { href: "/import", label: "Import", icon: "⇪" },
   { href: "/analytics", label: "Analytics", icon: "◔" },
   { href: "/settings", label: "Settings", icon: "⚙" },

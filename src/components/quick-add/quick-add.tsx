@@ -123,18 +123,28 @@ export function QuickAdd({ categories }: { categories: Category[] }) {
     const start = draft.startIso ? new Date(draft.startIso) : null;
     const end = draft.endIso ? new Date(draft.endIso) : null;
     const due = draft.dueIso ? new Date(draft.dueIso) : null;
-    const result = await createFromDraft({
-      title: draft.title,
-      kind: draft.kind,
-      startLocal: start ? toLocalIso(start) : null,
-      durationMinutes:
-        start && end ? Math.max(5, Math.round((end.getTime() - start.getTime()) / 60000)) : null,
-      dueLocal: due ? toLocalIso(due) : null,
-      allDay: draft.allDay,
-      rrule: draft.rrule,
-      categoryName: draft.categoryName,
-      habitTargetPerWeek: draft.habitTargetPerWeek,
-    });
+    // A throw here (dropped wifi, expired session) must never strand
+    // `pending` — the guard above would then block every retry and the one
+    // capture path in the app would stay dead until a reload.
+    let result: Awaited<ReturnType<typeof createFromDraft>>;
+    try {
+      result = await createFromDraft({
+        title: draft.title,
+        kind: draft.kind,
+        startLocal: start ? toLocalIso(start) : null,
+        durationMinutes:
+          start && end ? Math.max(5, Math.round((end.getTime() - start.getTime()) / 60000)) : null,
+        dueLocal: due ? toLocalIso(due) : null,
+        allDay: draft.allDay,
+        rrule: draft.rrule,
+        categoryName: draft.categoryName,
+        habitTargetPerWeek: draft.habitTargetPerWeek,
+      });
+    } catch {
+      setPending(false);
+      setError("Couldn't save that — check your connection and try again.");
+      return;
+    }
     setPending(false);
     if (result.error) {
       setError(result.error);

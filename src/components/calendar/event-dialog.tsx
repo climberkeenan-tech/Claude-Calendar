@@ -37,9 +37,19 @@ export function EventDialog({
   onClose: () => void;
 }) {
   const item = selected?.item ?? null;
+  // Escape and outside-click dismiss the sheet without going through Save —
+  // unsaved detail edits must be flushed, not discarded. The form registers
+  // its flush here.
+  const dismissFlushRef = React.useRef<(() => Promise<void>) | null>(null);
+  const dismiss = React.useCallback(() => {
+    const flush = dismissFlushRef.current;
+    dismissFlushRef.current = null;
+    if (flush) void flush().catch(() => {});
+    onClose();
+  }, [onClose]);
   if (!item) return null;
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && dismiss()}>
       <DialogContent
         title={
           item.kind === "task"
@@ -57,6 +67,7 @@ export function EventDialog({
           categories={categories}
           courses={courses}
           onClose={onClose}
+          dismissFlushRef={dismissFlushRef}
         />
       </DialogContent>
     </Dialog>
@@ -68,15 +79,29 @@ function EventForm({
   categories,
   courses,
   onClose,
+  dismissFlushRef,
 }: {
   item: CalendarItem;
   categories: Category[];
   courses: { id: string; name: string }[];
   onClose: () => void;
+  /** Lets the parent flush unsaved detail edits on Escape/outside-click. */
+  dismissFlushRef?: React.MutableRefObject<(() => Promise<void>) | null>;
 }) {
   const [showDetails, setShowDetails] = React.useState(false);
   const [detailsMounted, setDetailsMounted] = React.useState(false);
   const detailsFlushRef = React.useRef<(() => Promise<void>) | null>(null);
+  // Mirror the details flush up to the dialog shell so a dismissal saves
+  // exactly what Save would have.
+  React.useEffect(() => {
+    if (!dismissFlushRef) return;
+    dismissFlushRef.current = async () => {
+      if (detailsFlushRef.current) await detailsFlushRef.current();
+    };
+    return () => {
+      dismissFlushRef.current = null;
+    };
+  }, [dismissFlushRef]);
   const router = useRouter();
   const isTask = item.kind === "task";
   const anchor = item.startsAt ?? item.dueAt;
