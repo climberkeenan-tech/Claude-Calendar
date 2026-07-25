@@ -91,6 +91,23 @@ describe("parseLocal — the brief's acceptance phrasings", () => {
     expect(d.title.toLowerCase()).not.toContain("wednesday");
   });
 
+  it("reads a bare small hour as the afternoon, the way a student means it", () => {
+    // chrono's own answer for all of these is AM.
+    expect(time(parseLocal("Gym every Monday at 5", NOW).startIso!)).toBe("17:00");
+    expect(time(parseLocal("Dinner at 6", NOW).startIso!)).toBe("18:00");
+    expect(time(parseLocal("Practice at 4", NOW).startIso!)).toBe("16:00");
+    expect(time(parseLocal("Study at 7", NOW).startIso!)).toBe("19:00");
+  });
+
+  it("leaves an explicit meridiem and a plausible morning hour alone", () => {
+    expect(time(parseLocal("Shift at 5am", NOW).startIso!)).toBe("05:00");
+    expect(time(parseLocal("Shift at 5pm", NOW).startIso!)).toBe("17:00");
+    expect(time(parseLocal("Class at 8", NOW).startIso!)).toBe("08:00");
+    expect(time(parseLocal("Class at 9", NOW).startIso!)).toBe("09:00");
+    expect(time(parseLocal("Quiz at 10", NOW).startIso!)).toBe("10:00");
+    expect(time(parseLocal("Work at 12", NOW).startIso!)).toBe("12:00");
+  });
+
   it("parseLocal is fast enough for per-keystroke use", () => {
     const t0 = performance.now();
     for (let i = 0; i < 200; i++) {

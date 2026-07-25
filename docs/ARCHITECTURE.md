@@ -329,6 +329,46 @@ chips have no such constraint and are sized to 24 px.
 
 `docs/CLICK-COUNTS.md` is the companion audit for the ≤3-click rule.
 
+### Payload, as measured in Phase 10
+
+Two libraries dominate the client bundle, and both were in the wrong place:
+
+- **`chrono-node`** backs the instant quick-add chips, and quick-add is
+  mounted in the app layout — so every route paid for it. Two changes: import
+  `chrono-node/en` instead of the package root (which pulls all fourteen
+  locale parsers), and split the dialog *body* into its own chunk behind
+  `next/dynamic`. The shell that stays in the layout is just the ＋ button,
+  the `Q` key, and the dialog frame.
+- **Recharts** is ~105 KB gzipped and lives only on `/analytics`; it now
+  loads behind skeletons of the right height, so the KPIs and the score paint
+  first and nothing below the charts jumps when they arrive.
+
+The lazy quick-add chunk is warmed on `requestIdleCallback` after first paint
+(and again on pointer-enter of the button), so the "chips as you type"
+guarantee survives the split: measured **479 ms** from click to a focused
+input on a *cold* load that skips the warm entirely, and 221 ms from
+keystrokes to chips once loaded — against the Phase 3 gate of 1.5 s.
+
+Critical-path JS for an app route is **~200 KB gzipped**, with neither the
+chrono chunk (332 KB raw) nor the Recharts chunk (368 KB raw) in it.
+
+Lighthouse, against the production build: **/login 100 / 100 / 100 / 100**
+desktop and **98 / 100 / 100 / 100** mobile (performance / accessibility /
+best practices / SEO); a fixture route carrying the dashboard and calendar
+components scores **100 desktop, 95 mobile** on performance with LCP 0.6 s,
+TBT 0 ms, CLS 0. `/` and `/calendar` themselves can't be scored without a
+live database and a real Google sign-in, so those numbers come from the same
+components on a reachable route — re-run Lighthouse against the deployed URL
+after signing in to confirm.
+
+Re-measure with:
+
+```bash
+npx next build && npx next start -p 3000
+CHROME_PATH=$(which chromium) npx lighthouse http://127.0.0.1:3000/login \
+  --preset=desktop --only-categories=performance,accessibility,best-practices,seo
+```
+
 ---
 
 ## 11. Syllabus parser

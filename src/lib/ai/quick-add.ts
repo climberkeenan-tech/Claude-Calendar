@@ -1,4 +1,7 @@
-import * as chrono from "chrono-node";
+// English only. The package root pulls all fourteen locale parsers into the
+// client bundle, and this runs on every keystroke of a global dialog that's
+// mounted on every page in the app.
+import { parse as chronoParse } from "chrono-node/en";
 import { z } from "zod";
 import { instantFromWallClock, wallClockValue } from "@/lib/time";
 
@@ -67,6 +70,25 @@ function reanchor(d: Date): Date {
   return instantFromWallClock(dayIso, `${p(d.getHours())}:${p(d.getMinutes())}`);
 }
 
+/**
+ * chrono resolves a bare hour to AM: "gym at 5" books 5:00 in the morning,
+ * "dinner at 6" books breakfast. For a student, an unqualified 1–7 means the
+ * afternoon or evening essentially every time; 8–12 stays as written, because
+ * "class at 9" really is 9 AM on a campus. Only applied when the meridiem is
+ * genuinely unstated — "5am" and ranges ending in "pm" already carry it.
+ */
+const PM_ASSUMED_FROM = 1;
+const PM_ASSUMED_THROUGH = 7;
+
+function assumeAfternoon(d: Date, certainMeridiem: boolean): Date {
+  if (certainMeridiem) return d;
+  const h = d.getHours();
+  if (h < PM_ASSUMED_FROM || h > PM_ASSUMED_THROUGH) return d;
+  const out = new Date(d);
+  out.setHours(h + 12);
+  return out;
+}
+
 /** Local parse: chrono for dates/times + small patterns for recurrence. */
 export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
   let title = text.trim();
@@ -100,15 +122,19 @@ export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
   }
 
   // Dates/times via chrono (forwardDate: "Monday" means the coming Monday)
-  const results = chrono.parse(title, profileReference(now), { forwardDate: true });
+  const results = chronoParse(title, profileReference(now), { forwardDate: true });
   if (results.length > 0) {
     const r = results[0];
-    const start = reanchor(r.start.date());
     const certainTime = r.start.isCertain("hour");
+    const start = reanchor(
+      assumeAfternoon(r.start.date(), r.start.isCertain("meridiem")),
+    );
     if (certainTime) {
       startIso = start.toISOString();
       if (r.end) {
-        endIso = reanchor(r.end.date()).toISOString();
+        endIso = reanchor(
+          assumeAfternoon(r.end.date(), r.end.isCertain("meridiem")),
+        ).toISOString();
       }
     } else {
       // Date only — all-day (or a due date for tasks)

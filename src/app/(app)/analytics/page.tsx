@@ -9,7 +9,7 @@ import {
   StatTile,
   fmtMins,
 } from "@/components/analytics/bits";
-import { FocusTimeline, TrendLine } from "@/components/analytics/charts";
+import { FocusTimeline, TrendLine } from "@/components/analytics/charts-lazy";
 import { ScoreCard } from "@/components/analytics/score-card";
 
 export const dynamic = "force-dynamic";
