@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { fmtTime } from "@/lib/time";
+import { fmtIsoDay, fmtTime } from "@/lib/time";
 import {
   acceptPlan,
   undoPlan,
@@ -35,12 +35,7 @@ function fmtDuration(mins: number): string {
 }
 
 const dayLabel = (iso: string) =>
-  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+  fmtIsoDay(iso, { weekday: "long", month: "short", day: "numeric" });
 
 export function PlanReview({ context }: { context: PlanContext }) {
   const router = useRouter();

@@ -5,22 +5,25 @@ import { useRouter } from "next/navigation";
 import type { CalendarItem } from "@/lib/db/queries/calendar";
 import { layoutDay } from "@/lib/calendar/layout";
 import { contrastText } from "@/lib/utils";
+import {
+  dayOfMonth,
+  fmtHourLabel,
+  fmtIsoDay,
+  instantFromWallClock,
+  isoDay,
+  minutesOfDay,
+  shiftDay,
+} from "@/lib/time";
 import { moveEvent } from "@/server/calendar";
 import type { SelectedItem } from "./event-dialog";
 
 const HOUR_PX = 48;
 const SNAP_MIN = 15;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
-function isoOf(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-/** Minutes since local midnight. */
-function minOf(d: Date): number {
-  return d.getHours() * 60 + d.getMinutes();
-}
+/** Day key and wall-clock minutes in the PROFILE timezone — never the
+ * browser's, or the grid silently re-buckets every event when you travel. */
+const isoOf = (d: Date): string => isoDay(d);
+const minOf = (d: Date): number => minutesOfDay(d);
 
 type DragState = {
   item: CalendarItem;
@@ -65,13 +68,10 @@ export function TimeGrid({
     scrollRef.current?.scrollTo({ top: 7.5 * HOUR_PX });
   }, []);
 
-  const dayIsos = React.useMemo(() => {
-    const base = new Date(`${firstDayIso}T12:00:00`);
-    return Array.from({ length: days }, (_, i) => {
-      const d = new Date(base.getTime() + i * DAY_MS);
-      return isoOf(d);
-    });
-  }, [firstDayIso, days]);
+  const dayIsos = React.useMemo(
+    () => Array.from({ length: days }, (_, i) => shiftDay(firstDayIso, i)),
+    [firstDayIso, days],
+  );
 
   // Bucket timed items by local day; all-day items separately.
   const { timedByDay, allDayByDay } = React.useMemo(() => {
@@ -173,13 +173,10 @@ export function TimeGrid({
     // Build the instant from WALL-CLOCK fields, not midnight + elapsed ms:
     // on DST days the two diverge, and the grid renders wall clock — so an
     // event dropped on the 10 AM row committed 9 AM and visibly jumped.
-    const [yy, mm, dd] = iso.split("-").map(Number);
-    const startsAt = new Date(
-      yy,
-      mm - 1,
-      dd,
-      Math.floor(d.startMin / 60),
-      d.startMin % 60,
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const startsAt = instantFromWallClock(
+      iso,
+      `${pad(Math.floor(d.startMin / 60))}:${pad(d.startMin % 60)}`,
     );
     const endsAt = new Date(startsAt.getTime() + (d.endMin - d.startMin) * 60000);
     await moveEvent({
@@ -200,12 +197,11 @@ export function TimeGrid({
       <div className="grid border-b border-border" style={{ gridTemplateColumns: `3.5rem repeat(${days}, 1fr)` }}>
         <div />
         {dayIsos.map((iso) => {
-          const d = new Date(`${iso}T12:00:00`);
           const isToday = iso === todayIso;
           return (
             <div key={iso} className="border-l border-border px-2 py-2 text-center">
               <p className="text-[10px] font-medium uppercase tracking-wide text-ink-faint">
-                {d.toLocaleDateString("en-US", { weekday: "short" })}
+                {fmtIsoDay(iso, { weekday: "short" })}
               </p>
               <p
                 className={
@@ -214,7 +210,7 @@ export function TimeGrid({
                     : "text-sm text-ink"
                 }
               >
-                {d.getDate()}
+                {dayOfMonth(iso)}
               </p>
               <div className="mt-1 flex flex-col gap-0.5">
                 {(allDayByDay.get(iso) ?? []).map((item) => (
@@ -247,7 +243,7 @@ export function TimeGrid({
                 className="absolute right-2 -translate-y-1/2 font-mono text-[10px] text-ink-faint"
                 style={{ top: h * HOUR_PX }}
               >
-                {h === 0 ? "" : new Date(2000, 0, 1, h).toLocaleTimeString("en-US", { hour: "numeric" })}
+                {h === 0 ? "" : fmtHourLabel(h)}
               </span>
             ))}
           </div>

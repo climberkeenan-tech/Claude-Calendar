@@ -1,4 +1,4 @@
-import { fromFloating } from "@/lib/tz";
+import { fromFloating, toFloating } from "@/lib/tz";
 
 const DEFAULT_TZ = "America/New_York";
 
@@ -85,4 +85,111 @@ export function relativeDue(now: Date, due: Date, tz: string = DEFAULT_TZ): stri
     .slice(0, 10);
   if (dueIso === tomorrowIso) return `tomorrow ${fmtTime(due, tz)}`;
   return fmtShortDay(due, tz);
+}
+
+// ---------------------------------------------------------------------------
+// Profile-timezone primitives (Phase 10 consistency pass)
+//
+// Client views used to key dates off the BROWSER's timezone while the server
+// used the profile timezone. Identical while you're in Eastern — silently
+// wrong the moment you travel (an 11 PM Eastern class shows on the wrong day
+// from California, and dragging it commits the wrong hour). Everything the
+// calendar renders or writes now goes through these.
+// ---------------------------------------------------------------------------
+
+export const PROFILE_TZ = DEFAULT_TZ;
+
+/** The "YYYY-MM-DD" an instant falls on, in the profile timezone. */
+export function isoDay(d: Date, tz: string = PROFILE_TZ): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: tz,
+  }).format(d);
+}
+
+/** Minutes since midnight of the profile-timezone wall clock (0–1439). */
+export function minutesOfDay(d: Date, tz: string = PROFILE_TZ): number {
+  const f = toFloating(d, tz);
+  return f.getUTCHours() * 60 + f.getUTCMinutes();
+}
+
+/** "HH:MM" in the profile timezone — for <input type="time"> values. */
+export function timeValue(d: Date, tz: string = PROFILE_TZ): string {
+  const m = minutesOfDay(d, tz);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(Math.floor(m / 60))}:${p(m % 60)}`;
+}
+
+/** Wall-clock "YYYY-MM-DDTHH:MM:SS" in the profile timezone — the shape the
+ * server's draft schemas expect. */
+export function wallClockValue(d: Date, tz: string = PROFILE_TZ): string {
+  return `${isoDay(d, tz)}T${timeValue(d, tz)}:00`;
+}
+
+/** An instant from a profile-timezone wall clock, DST-correct. */
+export function instantFromWallClock(
+  dayIso: string,
+  hhmm: string,
+  tz: string = PROFILE_TZ,
+): Date {
+  return fromFloating(new Date(`${dayIso}T${hhmm}:00Z`), tz);
+}
+
+/** Parse a zone-less wall-clock string ("2026-09-14T19:00:00" — what Claude and
+ * the draft schemas emit) as PROFILE time. Plain `new Date(s)` reads it in the
+ * browser's zone, which silently shifts every AI-parsed item when travelling.
+ * Returns null for anything that isn't a wall clock. */
+export function instantFromWallClockIso(
+  s: string,
+  tz: string = PROFILE_TZ,
+): Date | null {
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(:\d{2})?(Z|[+-]\d{2}:?\d{2})?$/.exec(
+    s.trim(),
+  );
+  if (!m) return null;
+  // An explicit offset means it isn't a wall clock at all — take it at its word.
+  if (m[5]) {
+    const d = new Date(s.trim());
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return instantFromWallClock(m[1], `${m[2]}:${m[3]}`, tz);
+}
+
+/** Shift an ISO date by whole calendar days (noon anchor — DST-proof). */
+export function shiftDay(dayIso: string, days: number): string {
+  const d = new Date(`${dayIso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Monday=0 … Sunday=6 for an ISO date (no timezone involved). */
+export function weekdayIndex(dayIso: string): number {
+  return (new Date(`${dayIso}T12:00:00Z`).getUTCDay() + 6) % 7;
+}
+
+/** Day-of-month for an ISO date, as a number. */
+export function dayOfMonth(dayIso: string): number {
+  return Number(dayIso.slice(8, 10));
+}
+
+/** Format an ISO date (not an instant) — safe because the noon anchor can't
+ * slip a day in any timezone. */
+export function fmtIsoDay(
+  dayIso: string,
+  opts: Intl.DateTimeFormatOptions,
+): string {
+  return new Intl.DateTimeFormat("en-US", { ...opts, timeZone: "UTC" }).format(
+    new Date(`${dayIso}T12:00:00Z`),
+  );
+}
+
+/** "1 PM" for the time-grid's hour rail. Takes an hour number, not an instant —
+ * the rail is wall-clock furniture, unrelated to any date. */
+export function fmtHourLabel(hour: number): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(2000, 0, 1, hour)));
 }

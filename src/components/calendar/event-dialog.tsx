@@ -9,20 +9,20 @@ import type { CalendarItem } from "@/lib/db/queries/calendar";
 import { deleteEvent, editEvent, toggleOccurrence } from "@/server/calendar";
 import { completeEvent } from "@/server/events";
 import { EventDetailsSection } from "./event-details";
+import { instantFromWallClock, isoDay, timeValue } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 export type SelectedItem = { item: CalendarItem };
 type Category = { id: string; name: string; color: string };
 type Scope = "single" | "series" | "future";
 
-function p(n: number) {
-  return String(n).padStart(2, "0");
-}
+// Form values live in the PROFILE timezone, matching what the server stores —
+// editing a 9 AM class from a different timezone must not rewrite it to 6 AM.
 function dateVal(d: Date | null): string {
-  return d ? `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` : "";
+  return d ? isoDay(d) : "";
 }
 function timeVal(d: Date | null): string {
-  return d ? `${p(d.getHours())}:${p(d.getMinutes())}` : "";
+  return d ? timeValue(d) : "";
 }
 
 export function EventDialog({
@@ -129,9 +129,9 @@ function EventForm({
     let endsAt: Date | null = null;
     let dueAt: Date | null = null;
     if (date) {
-      const instant = new Date(`${date}T${time || "00:00"}:00`);
+      const instant = instantFromWallClock(date, time || "00:00");
       if (isTask) {
-        dueAt = time ? instant : new Date(`${date}T23:59:00`);
+        dueAt = time ? instant : instantFromWallClock(date, "23:59");
       } else {
         startsAt = instant;
         endsAt = new Date(instant.getTime() + duration * 60000);

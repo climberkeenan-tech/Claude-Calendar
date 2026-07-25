@@ -1,5 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { dayBounds, leftLabel, untilLabel, relativeDue } from "@/lib/time";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  dayBounds,
+  dayOfMonth,
+  fmtIsoDay,
+  instantFromWallClock,
+  instantFromWallClockIso,
+  isoDay,
+  leftLabel,
+  minutesOfDay,
+  relativeDue,
+  shiftDay,
+  timeValue,
+  untilLabel,
+  wallClockValue,
+  weekdayIndex,
+} from "@/lib/time";
 import { contrastText } from "@/lib/utils";
 
 describe("dayBounds (America/New_York)", () => {
@@ -77,6 +92,92 @@ describe("countdown labels", () => {
   it("labels due dates relative to now", () => {
     expect(relativeDue(t0, new Date("2026-07-19T00:00:00Z"))).toBe("overdue");
     expect(relativeDue(t0, new Date("2026-07-20T21:00:00Z"))).toMatch(/^today /);
+  });
+});
+
+/**
+ * Phase 10 consistency pass. These are the primitives every calendar view now
+ * keys off. The whole point is that they answer the same way from any host
+ * timezone — the browser's clock must never decide which day an event lands on.
+ */
+describe("profile-timezone primitives", () => {
+  const HOST_TZ = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = HOST_TZ;
+  });
+  const zones = ["UTC", "America/Los_Angeles", "Asia/Tokyo", "Asia/Kolkata", "Pacific/Auckland"];
+  const inEveryZone = <T,>(fn: () => T): T[] =>
+    zones.map((tz) => {
+      process.env.TZ = tz;
+      return fn();
+    });
+
+  it("buckets an instant onto the same campus day everywhere", () => {
+    // 2026-09-15 23:30 EDT = 03:30Z on the 16th. A browser in Tokyo sees the
+    // 16th, a browser in LA sees the 15th — the calendar must say the 15th.
+    const late = new Date("2026-09-16T03:30:00Z");
+    expect(new Set(inEveryZone(() => isoDay(late)))).toEqual(new Set(["2026-09-15"]));
+    expect(new Set(inEveryZone(() => timeValue(late)))).toEqual(new Set(["23:30"]));
+    expect(new Set(inEveryZone(() => minutesOfDay(late)))).toEqual(
+      new Set([23 * 60 + 30]),
+    );
+  });
+
+  it("round-trips wall clock → instant → wall clock", () => {
+    for (const [day, hhmm] of [
+      ["2026-01-15", "09:00"], // EST
+      ["2026-07-20", "09:00"], // EDT
+      ["2026-11-01", "13:45"], // fall-back day
+    ]) {
+      const back = inEveryZone(() => wallClockValue(instantFromWallClock(day, hhmm)));
+      expect(new Set(back)).toEqual(new Set([`${day}T${hhmm}:00`]));
+    }
+  });
+
+  it("applies the right UTC offset on each side of DST", () => {
+    expect(instantFromWallClock("2026-01-15", "09:00").toISOString()).toBe(
+      "2026-01-15T14:00:00.000Z", // EST, UTC-5
+    );
+    expect(instantFromWallClock("2026-07-20", "09:00").toISOString()).toBe(
+      "2026-07-20T13:00:00.000Z", // EDT, UTC-4
+    );
+  });
+
+  it("reads Claude's zone-less wall clock as campus time", () => {
+    const got = inEveryZone(() =>
+      instantFromWallClockIso("2026-09-14T19:00:00")!.toISOString(),
+    );
+    expect(new Set(got)).toEqual(new Set(["2026-09-14T23:00:00.000Z"]));
+    expect(instantFromWallClockIso("not a date")).toBeNull();
+    expect(instantFromWallClockIso("2026-09-14")).toBeNull();
+  });
+
+  it("honours an explicit offset instead of pretending it's a wall clock", () => {
+    expect(instantFromWallClockIso("2026-09-14T23:00:00Z")!.toISOString()).toBe(
+      "2026-09-14T23:00:00.000Z",
+    );
+    expect(instantFromWallClockIso("2026-09-14T19:00:00-04:00")!.toISOString()).toBe(
+      "2026-09-14T23:00:00.000Z",
+    );
+  });
+
+  it("shifts calendar days across both DST transitions and a year boundary", () => {
+    expect(shiftDay("2026-03-07", 1)).toBe("2026-03-08"); // spring forward
+    expect(shiftDay("2026-11-01", -1)).toBe("2026-10-31"); // fall back
+    expect(shiftDay("2026-12-31", 1)).toBe("2027-01-01");
+    expect(shiftDay("2026-03-01", -1)).toBe("2026-02-28");
+    expect(new Set(inEveryZone(() => shiftDay("2026-03-08", 7)))).toEqual(
+      new Set(["2026-03-15"]),
+    );
+  });
+
+  it("labels ISO dates without ever slipping a day", () => {
+    expect(weekdayIndex("2026-09-14")).toBe(0); // Monday
+    expect(weekdayIndex("2026-09-20")).toBe(6); // Sunday
+    expect(dayOfMonth("2026-09-01")).toBe(1);
+    expect(new Set(inEveryZone(() => fmtIsoDay("2026-09-14", { weekday: "short" })))).toEqual(
+      new Set(["Mon"]),
+    );
   });
 });
 

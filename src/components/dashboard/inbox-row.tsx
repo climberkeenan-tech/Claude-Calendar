@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { scheduleTask } from "@/server/calendar";
+import { instantFromWallClock } from "@/lib/time";
 import { CompleteButton } from "./complete-button";
 
 /** An undated capture: complete it, or give it a date in one tap. */
@@ -24,7 +25,8 @@ export function InboxRow({ id, title }: { id: string; title: string }) {
           const v = e.target.value;
           if (!v) return;
           startTransition(async () => {
-            await scheduleTask(id, new Date(`${v}T23:59:00`));
+            // End of the day on campus — not on whatever clock this device has.
+            await scheduleTask(id, instantFromWallClock(v, "23:59"));
             router.refresh();
           });
         }}

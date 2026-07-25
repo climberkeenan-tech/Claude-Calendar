@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { shortcutsSuspended } from "@/components/shortcuts/shortcuts-overlay";
 import type { CalendarItem } from "@/lib/db/queries/calendar";
 import { cn } from "@/lib/utils";
+import { fmtIsoDay, isoDay, shiftDay, weekdayIndex } from "@/lib/time";
 import { TimeGrid } from "./time-grid";
 import { MonthView } from "./month-view";
 import { AgendaView } from "./agenda-view";
@@ -21,11 +22,7 @@ const VIEWS: { key: CalendarView; label: string; shortcut: string }[] = [
   { key: "agenda", label: "Agenda", shortcut: "4" },
 ];
 
-function shiftIso(iso: string, days: number): string {
-  const d = new Date(`${iso}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+const shiftIso = shiftDay;
 
 /** Month navigation moves by CALENDAR month (anchored to the 1st) — stepping
  * 30 days from Jan 31 would skip February entirely. */
@@ -38,9 +35,7 @@ function shiftMonth(iso: string, delta: number): string {
 
 /** Monday-start week begin for an ISO day. */
 export function weekStartIso(iso: string): string {
-  const d = new Date(`${iso}T12:00:00Z`);
-  const dow = (d.getUTCDay() + 6) % 7;
-  return shiftIso(iso, -dow);
+  return shiftDay(iso, -weekdayIndex(iso));
 }
 
 export function CalendarShell({
@@ -74,11 +69,9 @@ export function CalendarShell({
         : shiftIso(anchorIso, dir * step),
     [view, anchorIso, step],
   );
-  const todayIso = (() => {
-    const n = new Date();
-    const p = (x: number) => String(x).padStart(2, "0");
-    return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
-  })();
+  // "Today" is the profile timezone's today — not the browser's, which would
+  // highlight the wrong column from another timezone.
+  const todayIso = isoDay(new Date());
 
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -100,14 +93,13 @@ export function CalendarShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [view, anchorIso, go, nav]);
 
-  const anchorDate = new Date(`${anchorIso}T12:00:00Z`);
   const heading =
     view === "week"
-      ? `Week of ${new Date(`${weekStartIso(anchorIso)}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}`
+      ? `Week of ${fmtIsoDay(weekStartIso(anchorIso), { month: "long", day: "numeric" })}`
       : view === "month"
-        ? anchorDate.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })
+        ? fmtIsoDay(anchorIso, { month: "long", year: "numeric" })
         : view === "day"
-          ? anchorDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })
+          ? fmtIsoDay(anchorIso, { weekday: "long", month: "long", day: "numeric" })
           : "Next 30 days";
 
   return (

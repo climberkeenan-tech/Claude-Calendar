@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { fmtIsoDay, isoDay } from "@/lib/time";
 import {
   createApiToken,
   revokeApiToken,
@@ -63,7 +64,7 @@ export function ClaudeAccess({
                 <span className="min-w-0 flex-1 truncate text-sm text-ink">{t.name}</span>
                 <span className="text-xs text-ink-faint">
                   {t.lastUsedAt
-                    ? `used ${t.lastUsedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                    ? `used ${fmtIsoDay(isoDay(t.lastUsedAt), { month: "short", day: "numeric" })}`
                     : "never used"}
                 </span>
                 <Button
@@ -91,7 +92,7 @@ export function ClaudeAccess({
           onClick={() =>
             startTransition(async () => {
               const token = await createApiToken(
-                `Claude access · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
+                `Claude access · ${fmtIsoDay(isoDay(new Date()), { month: "short", day: "numeric" })}`,
               );
               setFresh(token);
               router.refresh();

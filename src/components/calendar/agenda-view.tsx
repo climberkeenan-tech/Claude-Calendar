@@ -3,12 +3,8 @@
 import type { CalendarItem } from "@/lib/db/queries/calendar";
 import { CategoryDot } from "@/components/ui/badge";
 import { Card, CardBody, EmptyState } from "@/components/ui/card";
+import { fmtIsoDay, fmtTime, isoDay } from "@/lib/time";
 import type { SelectedItem } from "./event-dialog";
-
-function isoOf(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 export function AgendaView({
   anchorIso,
@@ -23,7 +19,7 @@ export function AgendaView({
   for (const item of items) {
     const anchor = item.startsAt ?? item.dueAt;
     if (!anchor) continue;
-    const iso = isoOf(anchor);
+    const iso = isoDay(anchor);
     if (iso < anchorIso) continue;
     groups.set(iso, [...(groups.get(iso) ?? []), item]);
   }
@@ -45,11 +41,10 @@ export function AgendaView({
   return (
     <div className="flex flex-col gap-4">
       {days.map((iso) => {
-        const d = new Date(`${iso}T12:00:00`);
         return (
           <div key={iso}>
             <h2 className="mb-1.5 px-1 font-display text-lg text-ink">
-              {d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+              {fmtIsoDay(iso, { weekday: "long", month: "long", day: "numeric" })}
             </h2>
             <Card>
               <CardBody className="py-2">
@@ -63,10 +58,10 @@ export function AgendaView({
                         <span className="w-20 shrink-0 font-mono text-xs text-ink-muted">
                           {item.allDay
                             ? "all day"
-                            : (item.startsAt ?? item.dueAt)?.toLocaleTimeString("en-US", {
-                                hour: "numeric",
-                                minute: "2-digit",
-                              })}
+                            : (() => {
+                                const t = item.startsAt ?? item.dueAt;
+                                return t ? fmtTime(t) : "";
+                              })()}
                         </span>
                         {item.categoryColor ? (
                           <CategoryDot color={item.categoryColor} />

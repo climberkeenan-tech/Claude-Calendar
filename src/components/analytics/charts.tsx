@@ -17,6 +17,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { fmtIsoDay } from "@/lib/time";
 import { fmtMins } from "./bits";
 
 const AXIS_TICK = {
@@ -48,18 +49,9 @@ function ChartTooltip({
   );
 }
 
-const shortDay = (iso: string) =>
-  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", {
-    weekday: "short",
-    timeZone: "UTC",
-  });
+const shortDay = (iso: string) => fmtIsoDay(iso, { weekday: "short" });
 
-const monthDay = (iso: string) =>
-  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+const monthDay = (iso: string) => fmtIsoDay(iso, { month: "short", day: "numeric" });
 
 /** Last 14 days of focus, one bar per day. */
 export function FocusTimeline({

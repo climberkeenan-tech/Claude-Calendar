@@ -4,9 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toggleOccurrence } from "@/server/calendar";
 import type { HabitWeek } from "@/lib/db/queries/dashboard";
+import { fmtIsoDay, isoDay, shiftDay } from "@/lib/time";
 import { cn } from "@/lib/utils";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * One habit, one week: seven tappable day cells + progress toward the weekly
@@ -22,19 +21,16 @@ export function HabitRow({
 }) {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
-  const weekStart = new Date(weekStartIso);
-  const today = new Date();
+  // Pure calendar-date arithmetic — no instants, so nothing to mis-bucket.
+  const todayIso = isoDay(new Date());
 
   const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart.getTime() + i * DAY_MS + 12 * 60 * 60 * 1000);
-    const iso = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/New_York",
-    }).format(d);
+    const iso = shiftDay(weekStartIso, i);
     return {
       iso,
-      label: d.toLocaleDateString("en-US", { weekday: "narrow", timeZone: "America/New_York" }),
+      label: fmtIsoDay(iso, { weekday: "narrow" }),
       done: habit.doneDates.includes(iso),
-      future: d.getTime() > today.getTime() + 12 * 60 * 60 * 1000,
+      future: iso > todayIso,
     };
   });
 

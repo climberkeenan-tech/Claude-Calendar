@@ -8,21 +8,30 @@ import { shortcutsSuspended } from "@/components/shortcuts/shortcuts-overlay";
 import { CategoryDot } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { parseLocal, type ClaudeDraft, type ParsedDraft } from "@/lib/ai/quick-add";
+import {
+  fmtShortDay,
+  fmtTime,
+  instantFromWallClock,
+  instantFromWallClockIso,
+  isoDay,
+  timeValue,
+  wallClockValue,
+} from "@/lib/time";
 import { createFromDraft } from "@/server/quick-add";
 
 type Category = { id: string; name: string; color: string };
 
-/** Date → local wall-clock ISO (no timezone suffix). */
+/** Instant → profile wall-clock ISO (no timezone suffix) — the shape the
+ * server's draft schema expects. */
 function toLocalIso(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
+  return wallClockValue(d);
 }
 
 function chipDate(d: Date): string {
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return fmtShortDay(d);
 }
 function chipTime(d: Date): string {
-  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return fmtTime(d);
 }
 
 const KIND_LABEL = { event: "Event", task: "Task", habit: "Habit" } as const;
@@ -32,8 +41,10 @@ function mergeClaude(
   prev: ParsedDraft | null,
   c: ClaudeDraft,
 ): ParsedDraft {
-  const start = c.start ? new Date(c.start) : null; // wall clock ≈ browser tz
-  const due = c.due ? new Date(c.due) : null;
+  // Claude returns a zone-less wall clock — it means campus time, not whatever
+  // zone this laptop happens to be sitting in.
+  const start = c.start ? instantFromWallClockIso(c.start) : null;
+  const due = c.due ? instantFromWallClockIso(c.due) : null;
   return {
     title: c.title || prev?.title || text.trim(),
     kind: c.kind,
@@ -313,16 +324,15 @@ function DetailsEditor({
 }) {
   const anchor = draft.startIso ?? draft.dueIso;
   const d = anchor ? new Date(anchor) : null;
-  const p = (n: number) => String(n).padStart(2, "0");
-  const dateVal = d ? `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` : "";
-  const timeVal = d && !draft.allDay ? `${p(d.getHours())}:${p(d.getMinutes())}` : "";
+  const dateVal = d ? isoDay(d) : "";
+  const timeVal = d && !draft.allDay ? timeValue(d) : "";
 
   function setAnchor(dateStr: string, timeStr: string) {
     if (!dateStr) {
       setDraft((v) => (v ? { ...v, startIso: null, endIso: null, dueIso: null } : v));
       return;
     }
-    const nd = new Date(`${dateStr}T${timeStr || "09:00"}:00`);
+    const nd = instantFromWallClock(dateStr, timeStr || "09:00");
     const iso = nd.toISOString();
     setDraft((v) => {
       if (!v) return v;

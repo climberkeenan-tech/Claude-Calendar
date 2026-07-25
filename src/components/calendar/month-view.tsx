@@ -2,12 +2,8 @@
 
 import type { CalendarItem } from "@/lib/db/queries/calendar";
 import { contrastText } from "@/lib/utils";
+import { dayOfMonth, isoDay, shiftDay, weekdayIndex } from "@/lib/time";
 import type { SelectedItem } from "./event-dialog";
-
-function isoOf(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 export function MonthView({
   anchorIso,
@@ -20,23 +16,25 @@ export function MonthView({
   onDay: (iso: string) => void;
   onSelect: (s: SelectedItem) => void;
 }) {
-  const [y, m] = anchorIso.split("-").map(Number);
-  const first = new Date(y, m - 1, 1);
-  const lead = (first.getDay() + 6) % 7; // Monday-first
-  const gridStart = new Date(y, m - 1, 1 - lead);
-  const todayIso = isoOf(new Date());
+  // Grid math on ISO strings in the PROFILE timezone — a browser in another
+  // zone must still see the same month laid out the same way.
+  const monthStr = anchorIso.slice(0, 7);
+  const firstIso = `${monthStr}-01`;
+  const lead = weekdayIndex(firstIso); // Monday-first
+  const gridStartIso = shiftDay(firstIso, -lead);
+  const todayIso = isoDay(new Date());
 
   const byDay = new Map<string, CalendarItem[]>();
   for (const item of items) {
     const anchor = item.startsAt ?? item.dueAt;
     if (!anchor) continue;
-    const iso = isoOf(anchor);
+    const iso = isoDay(anchor);
     byDay.set(iso, [...(byDay.get(iso) ?? []), item]);
   }
 
   const cells = Array.from({ length: 42 }, (_, i) => {
-    const d = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i);
-    return { date: d, iso: isoOf(d), inMonth: d.getMonth() === m - 1 };
+    const iso = shiftDay(gridStartIso, i);
+    return { iso, inMonth: iso.slice(0, 7) === monthStr };
   });
 
   return (
@@ -67,7 +65,7 @@ export function MonthView({
                 }
                 aria-label={`Open ${cell.iso}`}
               >
-                {cell.date.getDate()}
+                {dayOfMonth(cell.iso)}
               </button>
               <div className="flex flex-col gap-0.5">
                 {shown.map((item) => {

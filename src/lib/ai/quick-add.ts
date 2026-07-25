@@ -1,5 +1,6 @@
 import * as chrono from "chrono-node";
 import { z } from "zod";
+import { instantFromWallClock, wallClockValue } from "@/lib/time";
 
 /**
  * Quick-add parsing (ARCHITECTURE §6): local-first. `parseLocal` runs on every
@@ -46,6 +47,26 @@ const CATEGORY_HINTS: [RegExp, string][] = [
 
 const TASK_HINTS = /\b(due|submit|turn in|finish|hand in|deadline)\b/i;
 
+/**
+ * chrono only ever thinks in the *host's* wall clock — it has no idea the
+ * profile lives in Eastern. Handing it a reference whose host-local fields
+ * already read as profile time makes every relative phrase ("tomorrow",
+ * "Friday", "tonight") resolve against the right day, and the components it
+ * hands back are then re-anchored in the profile zone below. Without this,
+ * typing "class at 9am" from California books 6 AM Eastern.
+ */
+function profileReference(now: Date): Date {
+  return new Date(wallClockValue(now));
+}
+
+/** Chrono's result is a host-local Date whose fields ARE the profile wall
+ * clock (see `profileReference`) — turn those fields back into a real instant. */
+function reanchor(d: Date): Date {
+  const p = (n: number) => String(n).padStart(2, "0");
+  const dayIso = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return instantFromWallClock(dayIso, `${p(d.getHours())}:${p(d.getMinutes())}`);
+}
+
 /** Local parse: chrono for dates/times + small patterns for recurrence. */
 export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
   let title = text.trim();
@@ -79,15 +100,15 @@ export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
   }
 
   // Dates/times via chrono (forwardDate: "Monday" means the coming Monday)
-  const results = chrono.parse(title, now, { forwardDate: true });
+  const results = chrono.parse(title, profileReference(now), { forwardDate: true });
   if (results.length > 0) {
     const r = results[0];
-    const start = r.start.date();
+    const start = reanchor(r.start.date());
     const certainTime = r.start.isCertain("hour");
     if (certainTime) {
       startIso = start.toISOString();
       if (r.end) {
-        endIso = r.end.date().toISOString();
+        endIso = reanchor(r.end.date()).toISOString();
       }
     } else {
       // Date only — all-day (or a due date for tasks)
