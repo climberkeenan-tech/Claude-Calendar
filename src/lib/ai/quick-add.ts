@@ -80,12 +80,41 @@ function reanchor(d: Date): Date {
 const PM_ASSUMED_FROM = 1;
 const PM_ASSUMED_THROUGH = 7;
 
-function assumeAfternoon(d: Date, certainMeridiem: boolean): Date {
-  if (certainMeridiem) return d;
-  const h = d.getHours();
-  if (h < PM_ASSUMED_FROM || h > PM_ASSUMED_THROUGH) return d;
-  const out = new Date(d);
-  out.setHours(h + 12);
+function wantsAfternoon(hour: number, certainMeridiem: boolean): boolean {
+  return (
+    !certainMeridiem && hour >= PM_ASSUMED_FROM && hour <= PM_ASSUMED_THROUGH
+  );
+}
+
+/**
+ * Did the user actually name a day? chrono marks `day`/`weekday`/`month` as
+ * certain only when the text said so ("Friday", "tomorrow", "Sep 20"). A bare
+ * "at 5" leaves only `hour` certain, which means chrono picked the DAY itself
+ * using forwardDate.
+ */
+function dayWasInferred(c: {
+  isCertain: (component: "day" | "weekday" | "month") => boolean;
+}): boolean {
+  return !c.isCertain("day") && !c.isCertain("weekday") && !c.isCertain("month");
+}
+
+/**
+ * Re-run chrono's forward-date decision after the hour has been corrected.
+ *
+ * This is the whole subtlety. chrono reads "gym at 5" as 5 AM, sees 5 AM today
+ * has passed, and rolls it to TOMORROW. Bumping the hour to 5 PM afterwards
+ * leaves it on tomorrow — so "gym at 5" landed a day later than "gym at 5pm",
+ * from the same words, which is worse than the original AM problem. Once the
+ * hour is right, the earliest day that is still in the future is the answer.
+ */
+function soonestFutureDay(shifted: Date, reference: Date): Date {
+  const out = new Date(shifted);
+  for (let guard = 0; guard < 400; guard++) {
+    const prev = new Date(out);
+    prev.setDate(prev.getDate() - 1);
+    if (prev.getTime() <= reference.getTime()) break;
+    out.setTime(prev.getTime());
+  }
   return out;
 }
 
@@ -122,20 +151,58 @@ export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
   }
 
   // Dates/times via chrono (forwardDate: "Monday" means the coming Monday)
-  const results = chronoParse(title, profileReference(now), { forwardDate: true });
+  const reference = profileReference(now);
+  const results = chronoParse(title, reference, { forwardDate: true });
   if (results.length > 0) {
     const r = results[0];
     const certainTime = r.start.isCertain("hour");
-    const start = reanchor(
-      assumeAfternoon(r.start.date(), r.start.isCertain("meridiem")),
-    );
+
+    // Correct the hour first, THEN re-decide the day: doing it the other way
+    // round is what made "gym at 5" land a day after "gym at 5pm".
+    let localStart = r.start.date();
+    if (wantsAfternoon(localStart.getHours(), r.start.isCertain("meridiem"))) {
+      localStart = new Date(localStart);
+      localStart.setHours(localStart.getHours() + 12);
+      if (dayWasInferred(r.start)) {
+        localStart = soonestFutureDay(localStart, reference);
+      }
+    }
+
+    let localEnd = r.end ? r.end.date() : null;
+    if (localEnd) {
+      // Keep the range's shape: move the end by whatever the start moved, so
+      // "6:30–8pm" stays 90 minutes rather than being re-derived independently.
+      const dayShiftMs = localStart.getTime() - r.start.date().getTime();
+      localEnd = new Date(localEnd.getTime() + dayShiftMs);
+      // "9am to 5" — chrono reads the end as 5 AM and, since that precedes the
+      // start, pushes it to the NEXT day, turning a 9-to-5 into a 20-hour
+      // block. When the end's meridiem is unstated, a same-day afternoon
+      // reading beats a next-day morning one.
+      //
+      // The guard `after the start` is what keeps a genuine overnight range
+      // ("10pm to 2") alone: 2 PM on the start's day is BEFORE 10 PM, so the
+      // candidate is rejected and chrono's next-day 2 AM stands.
+      if (!r.end!.isCertain("meridiem")) {
+        const sameDayPm = new Date(localStart);
+        sameDayPm.setHours(
+          localEnd.getHours() + 12,
+          localEnd.getMinutes(),
+          localEnd.getSeconds(),
+          0,
+        );
+        if (
+          sameDayPm.getTime() > localStart.getTime() &&
+          sameDayPm.getTime() < localEnd.getTime()
+        ) {
+          localEnd = sameDayPm;
+        }
+      }
+    }
+
+    const start = reanchor(localStart);
     if (certainTime) {
       startIso = start.toISOString();
-      if (r.end) {
-        endIso = reanchor(
-          assumeAfternoon(r.end.date(), r.end.isCertain("meridiem")),
-        ).toISOString();
-      }
+      if (localEnd) endIso = reanchor(localEnd).toISOString();
     } else {
       // Date only — all-day (or a due date for tasks)
       startIso = start.toISOString();

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { activityLog, events, occurrences, reminders } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
-import { untilBefore, withUntil } from "@/lib/calendar/recurrence";
+import { carryUntil, untilBefore, withUntil } from "@/lib/calendar/recurrence";
 import { isoDayDiff, shiftIsoDate } from "@/lib/calendar/split";
 import { isoDayInTz, toFloating, fromFloating } from "@/lib/tz";
 import { ownedCategoryId } from "@/lib/db/ownership";
@@ -238,19 +238,43 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
         : event.endsAt && event.startsAt
           ? event.endsAt.getTime() - event.startsAt.getTime()
           : 60 * 60 * 1000;
-    if (until) {
-      await db
-        .update(events)
-        .set({ rrule: withUntil(event.rrule, until), updatedAt: new Date() })
-        .where(eq(events.id, event.id));
-    } else {
-      // Split lands on/before the first occurrence — the old series vanishes.
-      await db
-        .update(events)
-        .set({ status: "cancelled", updatedAt: new Date() })
-        .where(eq(events.id, event.id));
-    }
-    await db.insert(events).values({
+    // EVERY read happens before the first write, so the whole split can go out
+    // as ONE batch below. neon-http has no interactive transactions
+    // (db.transaction throws) — db.batch is the only atomic unit available,
+    // and without it a failure between the trim and the insert leaves the
+    // series truncated with no continuation: every future class silently gone,
+    // and unrecoverable because retrying re-trims an already-trimmed series.
+    const oldReminders = await db
+      .select()
+      .from(reminders)
+      .where(eq(reminders.eventId, event.id));
+    const splitIso = isoDayInTz(splitAt, event.tz);
+    const movedRows = await db
+      .select()
+      .from(occurrences)
+      .where(
+        and(
+          eq(occurrences.eventId, event.id),
+          gte(occurrences.occurrenceDate, splitIso),
+        ),
+      );
+
+    type Batchable = Parameters<typeof db.batch>[0][number];
+    const statements: Batchable[] = [];
+
+    statements.push(
+      until
+        ? db
+            .update(events)
+            .set({ rrule: withUntil(event.rrule, until), updatedAt: new Date() })
+            .where(eq(events.id, event.id))
+        : // Split lands on/before the first occurrence — the old series vanishes.
+          db
+            .update(events)
+            .set({ status: "cancelled", updatedAt: new Date() })
+            .where(eq(events.id, event.id)),
+    );
+    statements.push(db.insert(events).values({
       id: newId,
       userId,
       title: v.title,
@@ -261,7 +285,18 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
       startsAt: v.startsAt,
       endsAt: new Date(v.startsAt.getTime() + durationMs),
       allDay: event.allDay,
-      rrule: retargetWeekday(stripUntil(event.rrule), splitAt, v.startsAt, event.tz),
+      // Keep the ORIGINAL bound. stripUntil() here dropped it, so a
+      // syllabus-imported class (map.ts bounds every one at term end) recurred
+      // forever the first time it was edited with "this & future" — 29 real
+      // meetings became 193. retargetWeekday only rewrites BYDAY, so UNTIL
+      // rides through untouched; the only reason to touch it is the case
+      // below, where the edit pushes the occurrence past the old bound.
+      rrule: retargetWeekday(
+        carryUntil(event.rrule, v.startsAt, event.tz),
+        splitAt,
+        v.startsAt,
+        event.tz,
+      ),
       tz: event.tz,
       priority: event.priority,
       source: event.source,
@@ -275,26 +310,24 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
       estimatedMinutes: event.estimatedMinutes,
       actualMinutes: event.actualMinutes,
       sourceId: event.sourceId,
-    });
+    }));
     // Reminders are keyed by eventId — without copying them the continuing
     // series would go permanently silent (desiredJobs returns [] with no
     // reminder rows). Offset reminders copy cleanly; absolute ones belong to
     // the moment they were set for and stay with the old half.
-    const oldReminders = await db
-      .select()
-      .from(reminders)
-      .where(eq(reminders.eventId, event.id));
     const carried = oldReminders.filter((r) => r.offsetMinutes !== null);
     if (carried.length > 0) {
-      await db.insert(reminders).values(
-        carried.map((r) => ({
-          id: crypto.randomUUID(),
-          eventId: newId,
-          offsetMinutes: r.offsetMinutes,
-          absoluteAt: null,
-          channels: r.channels,
-          enabled: r.enabled,
-        })),
+      statements.push(
+        db.insert(reminders).values(
+          carried.map((r) => ({
+            id: crypto.randomUUID(),
+            eventId: newId,
+            offsetMinutes: r.offsetMinutes,
+            absoluteAt: null,
+            channels: r.channels,
+            enabled: r.enabled,
+          })),
+        ),
       );
     }
     // Occurrence state (cancellations, completions, moves) at/after the split
@@ -302,65 +335,64 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
     // When the edit moved the series to a different weekday, rows sitting on
     // the OLD weekday must also have their dates translated, or they attach
     // to dates the new rule never generates (ghost/orphaned occurrences).
-    const splitIso = isoDayInTz(splitAt, event.tz);
-    const movedRows = await db
-      .select()
-      .from(occurrences)
-      .where(
-        and(
-          eq(occurrences.eventId, event.id),
-          gte(occurrences.occurrenceDate, splitIso),
-        ),
-      );
-    const fromDow = weekdayInTz(splitAt, event.tz);
-    // The shift is the REAL calendar distance from the split slot to the new
-    // start — not a weekday difference wrapped into [-3,+3]. Wrapping sent a
-    // Monday→Friday move 3 days BACKWARD, cancelling the wrong class dates
-    // and resurrecting the ones the user had cancelled.
-    const delta = isoDayDiff(splitIso, isoDayInTz(v.startsAt, event.tz));
-    for (const row of movedRows) {
-      const rowDow =
-        (new Date(`${row.occurrenceDate}T12:00:00Z`).getUTCDay() + 6) % 7;
-      const newDate =
-        delta !== 0 && rowDow === fromDow
-          ? shiftIsoDate(row.occurrenceDate, delta)
-          : row.occurrenceDate;
-      await db
-        .delete(occurrences)
-        .where(
-          and(
-            eq(occurrences.eventId, event.id),
-            eq(occurrences.occurrenceDate, row.occurrenceDate),
+    if (movedRows.length > 0) {
+      const fromDow = weekdayInTz(splitAt, event.tz);
+      // The shift is the REAL calendar distance from the split slot to the new
+      // start — not a weekday difference wrapped into [-3,+3]. Wrapping sent a
+      // Monday→Friday move 3 days BACKWARD, cancelling the wrong class dates
+      // and resurrecting the ones the user had cancelled.
+      const delta = isoDayDiff(splitIso, isoDayInTz(v.startsAt, event.tz));
+      // Deletes target the OLD event id and inserts the NEW one, so the two
+      // never collide — one delete for the whole moved range is equivalent to
+      // the per-row deletes it replaces, and is one round trip instead of N.
+      statements.push(
+        db
+          .delete(occurrences)
+          .where(
+            and(
+              eq(occurrences.eventId, event.id),
+              gte(occurrences.occurrenceDate, splitIso),
+            ),
           ),
+      );
+      for (const row of movedRows) {
+        const rowDow =
+          (new Date(`${row.occurrenceDate}T12:00:00Z`).getUTCDay() + 6) % 7;
+        const newDate =
+          delta !== 0 && rowDow === fromDow
+            ? shiftIsoDate(row.occurrenceDate, delta)
+            : row.occurrenceDate;
+        // Two rows can land on one date (e.g. BYDAY=MO,TU with Monday moved
+        // onto Tuesday) — merge instead of throwing a PK violation mid-split.
+        statements.push(
+          db
+            .insert(occurrences)
+            .values({ ...row, eventId: newId, occurrenceDate: newDate })
+            .onConflictDoUpdate({
+              target: [occurrences.eventId, occurrences.occurrenceDate],
+              set: {
+                cancelled: sql`${occurrences.cancelled} or excluded.cancelled`,
+                completed: sql`${occurrences.completed} or excluded.completed`,
+                completedAt: sql`coalesce(${occurrences.completedAt}, excluded.completed_at)`,
+                overrides: sql`coalesce(excluded.overrides, ${occurrences.overrides})`,
+              },
+            }),
         );
-      // Two rows can land on one date (e.g. BYDAY=MO,TU with Monday moved
-      // onto Tuesday) — merge instead of throwing a PK violation mid-split.
-      await db
-        .insert(occurrences)
-        .values({ ...row, eventId: newId, occurrenceDate: newDate })
-        .onConflictDoUpdate({
-          target: [occurrences.eventId, occurrences.occurrenceDate],
-          set: {
-            cancelled: sql`${occurrences.cancelled} or excluded.cancelled`,
-            completed: sql`${occurrences.completed} or excluded.completed`,
-            completedAt: sql`coalesce(${occurrences.completedAt}, excluded.completed_at)`,
-            overrides: sql`coalesce(excluded.overrides, ${occurrences.overrides})`,
-          },
-        });
+      }
     }
+
+    // All or nothing.
+    await db.batch(statements as [Batchable, ...Batchable[]]);
+
+    // Reminder jobs are derived state, rebuilt from scratch on the next sync
+    // or by the nightly sweep — safe to do after the batch, since a failure
+    // here delays a notification rather than corrupting the calendar.
     await syncJobsForEvent(newId);
   }
   await log(userId, "event_edited", event.id, { title: v.title, scope: v.scope });
   await syncJobsForEvent(event.id);
   refresh();
   return {};
-}
-
-function stripUntil(rruleStr: string): string {
-  return rruleStr
-    .split(";")
-    .filter((p) => p && !p.toUpperCase().startsWith("UNTIL="))
-    .join(";");
 }
 
 const RRULE_DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
@@ -433,23 +465,27 @@ export async function deleteEvent(input: z.infer<typeof deleteSchema>): Promise<
       splitStart,
     );
     if (until) {
-      await db
-        .update(events)
-        .set({ rrule: withUntil(event.rrule, until), updatedAt: new Date() })
-        .where(eq(events.id, event.id));
       // Trimming the rule isn't enough: an occurrence the user had MOVED
       // (overrides.startsAt) is re-emitted unconditionally by expandEvent,
       // so it would haunt the calendar forever after the series was deleted
-      // out from under it. Clear everything at/after the split.
+      // out from under it. Clear everything at/after the split — in the SAME
+      // batch as the trim, or a failure between the two leaves exactly that
+      // ghost behind with no series to explain it.
       const splitIso = isoDayInTz(splitStart, event.tz);
-      await db
-        .delete(occurrences)
-        .where(
-          and(
-            eq(occurrences.eventId, event.id),
-            gte(occurrences.occurrenceDate, splitIso),
+      await db.batch([
+        db
+          .update(events)
+          .set({ rrule: withUntil(event.rrule, until), updatedAt: new Date() })
+          .where(eq(events.id, event.id)),
+        db
+          .delete(occurrences)
+          .where(
+            and(
+              eq(occurrences.eventId, event.id),
+              gte(occurrences.occurrenceDate, splitIso),
+            ),
           ),
-        );
+      ]);
     } else {
       await db.delete(events).where(eq(events.id, event.id));
     }

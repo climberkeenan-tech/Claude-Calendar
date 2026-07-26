@@ -9,7 +9,7 @@
  * one query away.
  */
 import { revalidatePath } from "next/cache";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import {
@@ -332,47 +332,68 @@ export async function undoImport(importId: string): Promise<ApproveResult> {
   if (!importRow) return { error: "Import not found." };
   if (importRow.status !== "approved") return { error: "Nothing to undo." };
 
-  // Row deletion cascades reminders/occurrences/jobs away; orphaned QStash
-  // alarms no-op at delivery (job row gone) — same contract as deleteEvent.
-  await db
-    .delete(events)
-    .where(and(eq(events.userId, userId), eq(events.sourceId, importId)));
+  const extraction = (importRow.extraction ?? {}) as StoredExtraction;
 
   // A course this import created goes too — unless the user has since hung
-  // their own events on it.
-  const extraction = (importRow.extraction ?? {}) as StoredExtraction;
+  // their OWN events on it. Asked before any write, and phrased as "events on
+  // this course that did not come from this import", so the answer doesn't
+  // depend on the delete below having already happened. That ordering is what
+  // lets the whole undo go out as one batch.
+  let dropCourse = false;
   if (extraction.createdCourseId) {
-    const remaining = await db
+    const foreign = await db
       .select({ n: count() })
       .from(events)
-      .where(eq(events.courseId, extraction.createdCourseId));
-    if ((remaining[0]?.n ?? 0) === 0) {
-      await db
+      .where(
+        and(
+          eq(events.courseId, extraction.createdCourseId),
+          ne(events.sourceId, importId),
+        ),
+      );
+    dropCourse = (foreign[0]?.n ?? 0) === 0;
+  }
+
+  const rest = { ...extraction };
+  delete rest.createdCourseId;
+  delete rest.approvedEventCount;
+
+  type Batchable = Parameters<typeof db.batch>[0][number];
+  const statements: Batchable[] = [
+    // Row deletion cascades reminders/occurrences/jobs away; orphaned QStash
+    // alarms no-op at delivery (job row gone) — same contract as deleteEvent.
+    db
+      .delete(events)
+      .where(and(eq(events.userId, userId), eq(events.sourceId, importId))),
+  ];
+  if (dropCourse && extraction.createdCourseId) {
+    statements.push(
+      db
         .delete(courses)
         .where(
           and(
             eq(courses.id, extraction.createdCourseId),
             eq(courses.userId, userId),
           ),
-        );
-    }
+        ),
+    );
   }
-
-  const rest = { ...extraction };
-  delete rest.createdCourseId;
-  delete rest.approvedEventCount;
-  await db
-    .update(syllabusImports)
-    .set({ status: "review", courseId: null, extraction: rest })
-    .where(eq(syllabusImports.id, importId));
-  await db.insert(activityLog).values({
-    id: crypto.randomUUID(),
-    userId,
-    type: "syllabus_import_undone",
-    entityType: "syllabus_import",
-    entityId: importId,
-    data: { filename: importRow.filename },
-  });
+  statements.push(
+    db
+      .update(syllabusImports)
+      .set({ status: "review", courseId: null, extraction: rest })
+      .where(eq(syllabusImports.id, importId)),
+    db.insert(activityLog).values({
+      id: crypto.randomUUID(),
+      userId,
+      type: "syllabus_import_undone",
+      entityType: "syllabus_import",
+      entityId: importId,
+      data: { filename: importRow.filename },
+    }),
+  );
+  // Either the whole import is undone or none of it is — a half-undo leaves
+  // events the review screen says were removed.
+  await db.batch(statements as [Batchable, ...Batchable[]]);
 
   refresh();
   return { ok: true };

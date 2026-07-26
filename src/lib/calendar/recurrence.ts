@@ -173,6 +173,29 @@ export function untilBefore(
 }
 
 /** Append/replace UNTIL in an rrule string. */
+/**
+ * The continuing half of a "this and future" split keeps the series' own
+ * UNTIL — that bound is the end of term and still applies to it. Dropping it
+ * turned a 29-meeting imported class into 193 the first time it was edited.
+ *
+ * The one exception: if the edit moved the occurrence PAST the old bound, an
+ * unchanged UNTIL would leave the new series empty, silently eating the very
+ * occurrence the user just moved. Then the bound extends to cover it, and no
+ * further.
+ */
+export function carryUntil(rruleStr: string, newStart: Date, tz: string): string {
+  const until = rruleStr
+    .split(";")
+    .find((p) => p.toUpperCase().startsWith("UNTIL="))
+    ?.slice(6);
+  if (!until) return rruleStr;
+  const floatingStart = toFloating(newStart, tz)
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+  return until >= floatingStart ? rruleStr : withUntil(rruleStr, floatingStart);
+}
+
 export function withUntil(rruleStr: string, untilFloating: string): string {
   const parts = rruleStr
     .split(";")

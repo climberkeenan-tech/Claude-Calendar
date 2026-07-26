@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  carryUntil,
   expandEvent,
+  type SeriesEvent,
   untilBefore,
   withUntil,
-  type SeriesEvent,
 } from "@/lib/calendar/recurrence";
 import { fromFloating, toFloating, wallClockToInstant } from "@/lib/tz";
 
@@ -220,5 +221,43 @@ describe("this-and-future split (untilBefore + withUntil)", () => {
 
   it("returns null when the split precedes the first occurrence", () => {
     expect(untilBefore(mondayGym, new Date("2026-02-02T22:00:00Z"))).toBeNull();
+  });
+});
+
+describe("carryUntil — the bound survives a this-and-future split", () => {
+  const TZ = "America/New_York";
+  // Every syllabus-imported class is bounded at term end (lib/import/map.ts).
+  const CLASS = "FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261211T235959Z";
+
+  const meetings = (rrule: string, start: Date) =>
+    expandEvent(
+      { id: "x", startsAt: start, endsAt: new Date(start.getTime() + 50 * 60000), rrule, tz: TZ },
+      [],
+      new Date("2026-10-01T00:00:00Z"),
+      new Date("2027-12-31T00:00:00Z"),
+    ).length;
+
+  it("keeps the term bound when the split stays inside the term", () => {
+    const newStart = wallClockToInstant("2026-10-06", "10:00", TZ);
+    expect(carryUntil(CLASS, newStart, TZ)).toBe(CLASS);
+    // Dropping UNTIL here turned 29 real meetings into 193 — a class that
+    // never ended, on every calendar it was ever exported to.
+    expect(meetings(carryUntil(CLASS, newStart, TZ), newStart)).toBe(29);
+    expect(meetings(CLASS.replace(";UNTIL=20261211T235959Z", ""), newStart)).toBeGreaterThan(150);
+  });
+
+  it("extends the bound only far enough to keep an occurrence moved past it", () => {
+    const late = wallClockToInstant("2027-02-01", "10:00", TZ);
+    const carried = carryUntil(CLASS, late, TZ);
+    expect(carried).not.toBe(CLASS);
+    expect(carried).toContain("UNTIL=20270201T100000Z");
+    // The occurrence the user just moved must survive, and nothing beyond it.
+    expect(meetings(carried, late)).toBe(1);
+    expect(meetings(CLASS, late)).toBe(0); // what an unchanged bound would give
+  });
+
+  it("leaves an unbounded series unbounded", () => {
+    const open = "FREQ=WEEKLY;BYDAY=MO";
+    expect(carryUntil(open, wallClockToInstant("2026-10-06", "10:00", TZ), TZ)).toBe(open);
   });
 });

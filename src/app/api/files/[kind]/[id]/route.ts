@@ -66,6 +66,16 @@ export async function GET(
       "Content-Disposition": `${disposition}; filename="${safeFilename(filename)}"`,
       ...(file.size ? { "Content-Length": String(file.size) } : {}),
       "Cache-Control": "private, no-store",
+      // The MIME comes from whatever the client claimed at upload time. Without
+      // this, a browser may sniff past a wrong Content-Type and render an
+      // uploaded file as HTML on our own origin.
+      //
+      // Deliberately NOT adding `Content-Security-Policy: sandbox` as well:
+      // it would harden this further, but it also breaks Chrome's built-in
+      // PDF viewer, and previewing a syllabus inline is the main reason this
+      // route exists. nosniff plus the inline-type allowlist above is the
+      // protection that costs nothing.
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }

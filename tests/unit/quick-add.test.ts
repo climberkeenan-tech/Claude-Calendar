@@ -99,6 +99,71 @@ describe("parseLocal — the brief's acceptance phrasings", () => {
     expect(time(parseLocal("Study at 7", NOW).startIso!)).toBe("19:00");
   });
 
+  it("a bare hour resolves to the SAME day as its explicit twin", () => {
+    // The bug this locks out: chrono reads "at 5" as 5 AM, sees 5 AM today has
+    // passed, and rolls the date to tomorrow. Bumping the hour to 5 PM
+    // afterwards left it on tomorrow — so "Gym at 5" booked a day later than
+    // "Gym at 5pm" from the same intent. The hour has to be corrected before
+    // the day is decided.
+    for (const [bare, explicit] of [
+      ["Gym at 5", "Gym at 5pm"],
+      ["Dinner at 6", "Dinner at 6pm"],
+      ["Study at 7", "Study at 7pm"],
+      ["Meeting at 2", "Meeting at 2pm"],
+    ]) {
+      const a = parseLocal(bare, NOW).startIso!;
+      const b = parseLocal(explicit, NOW).startIso!;
+      expect(`${bare} -> ${day(a)} ${time(a)}`).toBe(`${bare} -> ${day(b)} ${time(b)}`);
+    }
+    // …and that shared answer is TODAY, because 5 PM Monday is still ahead.
+    expect(day(parseLocal("Gym at 5", NOW).startIso!)).toBe("2026-09-14");
+  });
+
+  it("an explicitly named day is never pulled backwards", () => {
+    // Only a day chrono INFERRED may be re-decided. "Friday" was stated.
+    expect(day(parseLocal("Study Friday at 7", NOW).startIso!)).toBe("2026-09-18");
+    expect(time(parseLocal("Study Friday at 7", NOW).startIso!)).toBe("19:00");
+    expect(day(parseLocal("Lab tomorrow at 3", NOW).startIso!)).toBe("2026-09-15");
+    expect(day(parseLocal("Dinner on Sep 20 at 6", NOW).startIso!)).toBe("2026-09-20");
+  });
+
+  it("an explicit AM hour still rolls forward when it has passed", () => {
+    // 5 AM Monday is gone; "5am" means tomorrow. Only the PM assumption is
+    // re-decided, never chrono's ordinary forward-date behaviour.
+    const d = parseLocal("Shift at 5am", NOW);
+    expect(day(d.startIso!)).toBe("2026-09-15");
+    expect(time(d.startIso!)).toBe("05:00");
+  });
+
+  it("reads a range's unstated end as the same afternoon, not the next morning", () => {
+    // "9am to 5": chrono makes the end 5 AM, and because that precedes the
+    // start it pushes it to the next day — a 9-to-5 becomes a 20-hour block.
+    const nine = parseLocal("Meeting 9am to 5", NOW);
+    expect(time(nine.startIso!)).toBe("09:00");
+    expect(day(nine.endIso!)).toBe(day(nine.startIso!));
+    expect(time(nine.endIso!)).toBe("17:00");
+
+    const bare = parseLocal("Lab 1 to 3", NOW);
+    expect(time(bare.startIso!)).toBe("13:00");
+    expect(time(bare.endIso!)).toBe("15:00");
+
+    const morning = parseLocal("Class 8am to 3", NOW);
+    expect(time(morning.startIso!)).toBe("08:00");
+    expect(time(morning.endIso!)).toBe("15:00");
+  });
+
+  it("keeps a genuine overnight range overnight", () => {
+    // 2 PM would be BEFORE the 10 PM start, so the same-day reading is
+    // rejected and chrono's next-day 2 AM stands.
+    const d = parseLocal("Study 10pm to 2", NOW);
+    expect(time(d.startIso!)).toBe("22:00");
+    expect(day(d.endIso!)).toBe("2026-09-15");
+    expect(time(d.endIso!)).toBe("02:00");
+    expect(new Date(d.endIso!).getTime()).toBeGreaterThan(
+      new Date(d.startIso!).getTime(),
+    );
+  });
+
   it("leaves an explicit meridiem and a plausible morning hour alone", () => {
     expect(time(parseLocal("Shift at 5am", NOW).startIso!)).toBe("05:00");
     expect(time(parseLocal("Shift at 5pm", NOW).startIso!)).toBe("17:00");
