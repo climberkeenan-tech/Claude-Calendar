@@ -134,4 +134,16 @@ points at a loopback host.
 ```bash
 npm run build && npm start &          # with the local DATABASE_URL from above
 node scripts/verify-ui.mjs            # screenshots land in /tmp/phase12
+node scripts/smoke-flows.mjs          # types into the real UI, checks the DB
 ```
+
+`smoke-flows.mjs` is the one that catches what the other two can't. Unit tests
+and integration tests both pass over a server action that throws the moment
+it's invoked — on its first run this script found exactly that, with quick add
+returning 500 on every save. It types into the real dialog, confirms, and then
+asks the database whether the row it expected is there, with the right kind,
+the right title and the right instant.
+
+Restart the server after any rebuild before running either script: `next start`
+serves from `.next`, and rebuilding underneath it leaves the running process
+pointing at chunks that no longer exist.

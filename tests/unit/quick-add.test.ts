@@ -269,3 +269,23 @@ describe("a named day is a day, not the moment chrono filled in", () => {
     expect(time(d.endIso!)).toBe("07:00");
   });
 });
+
+describe("the title is what's left after the date phrase, and nothing else", () => {
+  // Found by typing into the real app: "Chem lab writeup due Thursday" landed
+  // on the assignments board as "Chem lab writeup due".
+  const titleOf = (s: string) => parseLocal(s, NOW).title;
+
+  it("drops the preposition the date hung off", () => {
+    expect(titleOf("Chem lab writeup due Thursday")).toBe("Chem lab writeup");
+    expect(titleOf("Essay due Friday")).toBe("Essay");
+    expect(titleOf("Lab report due by Friday")).toBe("Lab report");
+    expect(titleOf("Study group at 5pm")).toBe("Study group");
+    expect(titleOf("Dentist on Tuesday")).toBe("Dentist");
+  });
+
+  it("keeps a word that is part of the title itself", () => {
+    // "due" only goes when it's trailing the date phrase, never mid-title.
+    expect(titleOf("Pay tuition due balance Friday")).toBe("Pay tuition due balance");
+    expect(titleOf("Reading")).toBe("Reading");
+  });
+});

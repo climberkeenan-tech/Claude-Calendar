@@ -229,7 +229,13 @@ export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
     }
     title = (title.slice(0, r.index) + title.slice(r.index + r.text.length))
       .replace(/\s{2,}/g, " ")
-      .replace(/\s+(at|on|by|from)\s*$/i, "")
+      // "due" belongs to the date phrase, not the title. Removing "Thursday"
+      // from "Chem lab writeup due Thursday" used to leave "Chem lab writeup
+      // due" sitting on the board. The kind was already decided from the
+      // ORIGINAL text, so dropping the word here can't turn a task into an
+      // event. Repeated so "due by Friday" loses both words.
+      .replace(/\s+(at|on|by|from|due|before)\s*$/i, "")
+      .replace(/\s+(at|on|by|from|due|before)\s*$/i, "")
       .trim();
   }
 

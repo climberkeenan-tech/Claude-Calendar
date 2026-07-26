@@ -31,10 +31,19 @@ export interface ButtonProps
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  function Button({ className, variant = "primary", size = "md", ...props }, ref) {
+  function Button(
+    // `type` defaults to "button", not the HTML default of "submit". A Button
+    // dropped inside a <form> otherwise submits it on click — so Cancel would
+    // save. course-manager already carried a hand-written type="button" on its
+    // Cancel for exactly that reason; making it the default means the next
+    // form doesn't have to remember. Every real submit already says so.
+    { className, variant = "primary", size = "md", type = "button", ...props },
+    ref,
+  ) {
     return (
       <button
         ref={ref}
+        type={type}
         className={cn(
           "inline-flex items-center justify-center rounded-(--radius-sm) font-medium",
           "transition-colors duration-150 select-none",
