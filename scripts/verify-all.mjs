@@ -28,6 +28,7 @@ const SCRIPTS = [
   ["smoke-reminders.mjs", "reminder jobs survive a re-sync"],
   ["smoke-plan.mjs", "plan accept, undo, and the replan sweep"],
   ["smoke-import.mjs", "syllabus approve and undo"],
+  ["smoke-actions.mjs", "every remaining server action, called once"],
   ["smoke-mcp.mjs", "the MCP protocol surface"],
 ];
 

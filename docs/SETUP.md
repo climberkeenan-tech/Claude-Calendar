@@ -145,6 +145,7 @@ node scripts/smoke-recurring.mjs      # the three recurring edit scopes
 node scripts/smoke-reminders.mjs      # reminder jobs survive a re-sync
 node scripts/smoke-plan.mjs           # plan accept, undo, replan sweep
 node scripts/smoke-import.mjs         # syllabus approve and undo
+node scripts/smoke-actions.mjs        # every remaining server action
 node scripts/smoke-mcp.mjs            # the MCP protocol surface
 ```
 
