@@ -9,7 +9,7 @@
  * one query away.
  */
 import { revalidatePath } from "next/cache";
-import { and, count, eq, ne } from "drizzle-orm";
+import { and, count, eq, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import {
@@ -347,7 +347,11 @@ export async function undoImport(importId: string): Promise<ApproveResult> {
       .where(
         and(
           eq(events.courseId, extraction.createdCourseId),
-          ne(events.sourceId, importId),
+          // isNull FIRST, and not for tidiness: an event the user made
+          // themselves has sourceId NULL, and `NULL <> 'imp'` is NULL, not
+          // true — so a bare ne() counts zero foreign events and drops the
+          // course out from under everything the user attached to it.
+          or(isNull(events.sourceId), ne(events.sourceId, importId)),
         ),
       );
     dropCourse = (foreign[0]?.n ?? 0) === 0;
