@@ -272,15 +272,32 @@ export async function deliverJob(jobId: string): Promise<DeliverOutcome> {
     }
   }
 
-  // Take the lease.
-  await db
+  // Take the lease — CONDITIONALLY, re-testing the same predicate the early
+  // check used. That check happened several awaits ago (event lookup, quiet
+  // hours), so on its own it was a check-then-act: two runs could both pass it
+  // and both send. Claiming and testing in one statement means exactly one
+  // wins, and the loser skips instead of sending a duplicate push.
+  const claimed = await db
     .update(notificationJobs)
     .set({
       status: "sending",
       leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
       attempts: job.attempts + 1,
     })
-    .where(eq(notificationJobs.id, jobId));
+    .where(
+      and(
+        eq(notificationJobs.id, jobId),
+        or(
+          inArray(notificationJobs.status, ["pending", "deferred"]),
+          and(
+            eq(notificationJobs.status, "sending"),
+            lt(notificationJobs.leaseExpiresAt, now),
+          ),
+        ),
+      ),
+    )
+    .returning({ id: notificationJobs.id });
+  if (claimed.length === 0) return "skipped";
 
   const result = await dispatch(job.channel, {
     jobId,
