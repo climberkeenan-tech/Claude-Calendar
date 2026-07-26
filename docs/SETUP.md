@@ -137,6 +137,7 @@ node scripts/verify-ui.mjs            # screenshots land in /tmp/phase12
 node scripts/smoke-flows.mjs          # types into the real UI, checks the DB
 node scripts/smoke-mcp.mjs            # mints a token, drives the MCP protocol
 node scripts/smoke-import.mjs         # approve + undo a seeded syllabus
+node scripts/smoke-reminders.mjs      # reminder jobs survive a re-sync
 ```
 
 `smoke-flows.mjs` is the one that catches what the other two can't. Unit tests
