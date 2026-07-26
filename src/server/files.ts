@@ -6,7 +6,7 @@
  * Phase 7 storage layer).
  */
 import { revalidatePath } from "next/cache";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { attachments, events } from "@/lib/db/schema";
@@ -110,7 +110,15 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
     .where(and(eq(attachments.id, attachmentId), eq(events.userId, userId)));
   const row = rows[0];
   if (!row) return;
-  await deleteStoredFile(row.blobUrl);
+  // A "this & future" split copies attachment rows forward pointing at the
+  // SAME immutable blob, so this row is not necessarily the only claim on the
+  // file. Deleting it unconditionally would leave the continuing series with
+  // an attachment whose bytes are gone — a broken download, not a missing one.
+  const others = await db
+    .select({ n: count() })
+    .from(attachments)
+    .where(and(eq(attachments.blobUrl, row.blobUrl), ne(attachments.id, row.id)));
   await db.delete(attachments).where(eq(attachments.id, attachmentId));
+  if ((others[0]?.n ?? 0) === 0) await deleteStoredFile(row.blobUrl);
   revalidatePath("/calendar");
 }

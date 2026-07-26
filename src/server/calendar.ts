@@ -4,7 +4,14 @@ import { revalidatePath } from "next/cache";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
-import { activityLog, events, occurrences, reminders } from "@/lib/db/schema";
+import {
+  activityLog,
+  attachments,
+  checklistItems,
+  events,
+  occurrences,
+  reminders,
+} from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { carryUntil, untilBefore, withUntil } from "@/lib/calendar/recurrence";
 import { isoDayDiff, shiftIsoDate } from "@/lib/calendar/split";
@@ -248,6 +255,19 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
       .select()
       .from(reminders)
       .where(eq(reminders.eventId, event.id));
+    // Checklist items and attachments are keyed by eventId exactly like
+    // reminders are. Leaving them behind stranded them on the now-past-only
+    // half with no UI that can reach them: from the split date onward
+    // getEventDetails queries the NEW id, so the prep checklist came back
+    // empty and the uploaded lab manual was simply gone.
+    const oldChecklist = await db
+      .select()
+      .from(checklistItems)
+      .where(eq(checklistItems.eventId, event.id));
+    const oldAttachments = await db
+      .select()
+      .from(attachments)
+      .where(eq(attachments.eventId, event.id));
     const splitIso = isoDayInTz(splitAt, event.tz);
     const movedRows = await db
       .select()
@@ -326,6 +346,40 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
             absoluteAt: null,
             channels: r.channels,
             enabled: r.enabled,
+          })),
+        ),
+      );
+    }
+    // The checklist belongs to the SERIES, not to one meeting, so it carries
+    // forward with its done/position state intact — same reasoning as the
+    // description and tags above.
+    if (oldChecklist.length > 0) {
+      statements.push(
+        db.insert(checklistItems).values(
+          oldChecklist.map((c) => ({
+            id: crypto.randomUUID(),
+            eventId: newId,
+            text: c.text,
+            done: c.done,
+            position: c.position,
+          })),
+        ),
+      );
+    }
+    // Attachments carry forward as new ROWS pointing at the SAME blob — the
+    // file is immutable and re-uploading it would be a second copy of the same
+    // bytes. deleteAttachment therefore keeps the blob while any other row
+    // still references it.
+    if (oldAttachments.length > 0) {
+      statements.push(
+        db.insert(attachments).values(
+          oldAttachments.map((a) => ({
+            id: crypto.randomUUID(),
+            eventId: newId,
+            blobUrl: a.blobUrl,
+            filename: a.filename,
+            mime: a.mime,
+            size: a.size,
           })),
         ),
       );
