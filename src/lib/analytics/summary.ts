@@ -15,6 +15,7 @@ import {
 } from "@/lib/db/schema";
 import { getHabitsWeek } from "@/lib/db/queries/calendar";
 import { fromFloating, isoDayInTz } from "@/lib/tz";
+import { minutesOfDay } from "@/lib/time";
 import { computeDayLive, needsRollup, rollupUser } from "./rollup";
 import type { DayStatsRow } from "./rollup-core";
 import {
@@ -41,6 +42,24 @@ function weekDaysOf(dayIso: string): string[] {
 }
 
 type DayRecord = DayStatsRow & { day: string };
+
+/**
+ * How much of today's WAKING window (the same 08:00–22:00 the rollup uses for
+ * free minutes) has gone by, 0–1. Before the window opens it reads 0; after it
+ * closes, 1.
+ *
+ * The focus target prorates by this. Without it a full day's target applied
+ * from midnight, so tracking ten minutes at 08:15 scored worse than never
+ * opening the timer at all.
+ */
+function wakingDayElapsed(now: Date): number {
+  const minutes = minutesOfDay(now, TZ);
+  const open = 8 * 60;
+  const close = 22 * 60;
+  if (minutes <= open) return 0;
+  if (minutes >= close) return 1;
+  return (minutes - open) / (close - open);
+}
 
 const EMPTY: DayStatsRow = {
   minutesStudied: 0,
@@ -252,6 +271,7 @@ async function buildWeekScoreInput(
       openOverdueNow: overdueRows[0]?.n ?? 0,
       usesTasks: anyTask.length > 0,
       daysElapsed: past.length,
+      dayFraction: wakingDayElapsed(now),
     },
   };
 }

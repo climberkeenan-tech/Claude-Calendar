@@ -29,6 +29,17 @@ export type WeekScoreInput = {
   /** Days of the week elapsed so far (1–7). Accrual targets (focus, habits)
    * prorate by this — a perfect Monday scores 100, not 14. */
   daysElapsed: number;
+  /**
+   * How much of TODAY has gone by, 0–1 against the waking window. Optional;
+   * omitting it means "all of it", which is right for any finished week.
+   *
+   * Focus minutes accrue continuously, so charging a whole day's target at
+   * 08:15 made ten tracked minutes score WORSE than never starting the timer
+   * (the component drops out entirely at zero). Habits deliberately ignore
+   * this — they're discrete daily ticks, not something you accrue by the
+   * hour.
+   */
+  dayFraction?: number;
 };
 
 export type ScorePart = {
@@ -99,7 +110,14 @@ export function weeklyScore(input: WeekScoreInput): WeekScore {
   // Prorated: graded against the target for the days elapsed so far.
   if (input.focusMinutes > 0) {
     const perDay = input.focusTargetMinutesPerDay ?? DEFAULT_FOCUS_TARGET_PER_DAY;
-    const target = perDay * elapsed;
+    // Whole days finished, plus however much of today has actually happened.
+    // The floor is small on purpose — just enough to stop a divide-by-~zero at
+    // 08:00. A larger one would recreate the bug: at 08:15 barely 1% of the
+    // waking day has gone by, so expecting a quarter day's focus is expecting
+    // most of the time that has passed to have been focus.
+    const today = clamp01(input.dayFraction ?? 1);
+    const accrued = Math.max(0.05, elapsed - 1 + today);
+    const target = Math.max(1, Math.round(perDay * accrued));
     parts.push({
       key: "focus",
       label: "Focus time",

@@ -119,7 +119,11 @@ export async function gatherDayInputs(
     busy: blocks
       .filter(
         (b) =>
-          b.kind === "event" &&
+          // `kind !== "task"` to match getBusyBlocks, which is what /plan
+          // actually schedules around. Filtering to "event" dropped timed
+          // habits — a standing gym hour is real, occupied time — so
+          // analytics reported free time the planner would never offer.
+          b.kind !== "task" &&
           !b.allDay &&
           b.startsAt !== null &&
           b.endsAt !== null,

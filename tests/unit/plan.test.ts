@@ -292,3 +292,81 @@ describe("proposeBlocks — the quality rules that make Accept trustworthy", () 
     expect(empty.unplaceable[0].reason).toBe("no_free_time");
   });
 });
+
+describe("focus hours actually move the block", () => {
+  // The planner only ever scored a slot's OPENING instant and then placed the
+  // block there, so on a wide-open day every session was pinned to the start
+  // of the free block. The "you focus best around 8 PM" line the plan screen
+  // shows above the proposals had no effect on the proposals.
+  const openDay = [fb(14, 9, 22)];
+  const peaksAt = (hour: number) =>
+    Array.from({ length: 24 }, (_, h) => (h === hour ? 10 : 1));
+
+  const placeAt = (hour: number) =>
+    proposeBlocks({
+      tasks: [task({ estimatedMinutes: 60 })],
+      free: openDay,
+      now,
+      hourOf,
+      dayKeyOf,
+      focusByHour: peaksAt(hour),
+    }).proposals[0];
+
+  it("puts the session at the peak hour, wherever it falls in the slot", () => {
+    for (const hour of [10, 15, 20]) {
+      const block = placeAt(hour);
+      expect(block).toBeDefined();
+      expect(hourOf(block.start)).toBe(hour);
+    }
+  });
+
+  it("doesn't waste the time it skipped over", () => {
+    // Two tasks, an evening preference, one long slot: the second task should
+    // still be able to use the morning the first one jumped past.
+    const { proposals } = proposeBlocks({
+      tasks: [
+        task({ id: "a", title: "A", estimatedMinutes: 60, priority: "critical" }),
+        task({ id: "b", title: "B", estimatedMinutes: 60, priority: "critical" }),
+      ],
+      free: openDay,
+      now,
+      hourOf,
+      dayKeyOf,
+      focusByHour: peaksAt(20),
+    });
+    expect(proposals).toHaveLength(2);
+    const hours = proposals.map((p) => hourOf(p.start)).sort((x, y) => x - y);
+    expect(hours[1]).toBe(20); // one lands on the peak
+    expect(hours[0]).toBeLessThan(20); // the other reuses the earlier time
+  });
+
+  it("still respects the deadline when picking a later hour", () => {
+    const { proposals } = proposeBlocks({
+      tasks: [task({ estimatedMinutes: 60, dueAt: at(14, 12) })],
+      free: openDay,
+      now,
+      hourOf,
+      dayKeyOf,
+      focusByHour: peaksAt(20), // wants the evening, can't have it
+    });
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0].end.getTime()).toBeLessThanOrEqual(at(14, 12).getTime());
+  });
+});
+
+describe("unplaceable reasons stay honest", () => {
+  it("doesn't blame a deadline a task doesn't have", () => {
+    const shared = { free: [fb(14, 9, 10)], now, hourOf, dayKeyOf };
+    const noDeadline = proposeBlocks({
+      tasks: [task({ estimatedMinutes: 90 })], // needs 90, gap is 60
+      ...shared,
+    });
+    expect(noDeadline.unplaceable[0].reason).toBe("no_free_time");
+
+    const hasDeadline = proposeBlocks({
+      tasks: [task({ estimatedMinutes: 90, dueAt: at(14, 10) })],
+      ...shared,
+    });
+    expect(hasDeadline.unplaceable[0].reason).toBe("no_time_before_due");
+  });
+});

@@ -267,3 +267,59 @@ describe("the score never punishes doing the right thing", () => {
     }
   });
 });
+
+describe("the focus target follows the clock, not the calendar", () => {
+  const monday = {
+    ...base,
+    usesTasks: true,
+    daysElapsed: 1,
+    focusTargetMinutesPerDay: 60,
+  };
+
+  it("ten minutes at 08:15 no longer scores worse than never starting", () => {
+    // dayFraction ~0.018 of the 08:00-22:00 window => a 3-minute expectation,
+    // so ten tracked minutes is comfortably ahead of pace rather than 17% of
+    // a whole day's target.
+    const tracked = weeklyScore({ ...monday, focusMinutes: 10, dayFraction: 0.018 });
+    const untracked = weeklyScore({ ...monday, focusMinutes: 0 });
+    expect(tracked.score!).toBeGreaterThanOrEqual(untracked.score!);
+
+    // The shipped behaviour: a whole day's target charged at breakfast.
+    const wholeDay = weeklyScore({ ...monday, focusMinutes: 10, dayFraction: 1 });
+    expect(wholeDay.score!).toBeLessThan(untracked.score!);
+  });
+
+  it("the target grows as the day does", () => {
+    const targetAt = (dayFraction: number) =>
+      weeklyScore({ ...monday, focusMinutes: 30, dayFraction }).parts.find(
+        (p) => p.key === "focus",
+      )!.detail;
+    expect(targetAt(0)).toContain("of 3 focus minutes"); // floor
+    expect(targetAt(0.5)).toContain("of 30 focus minutes");
+    expect(targetAt(1)).toContain("of 60 focus minutes");
+  });
+
+  it("finished days still count in full, and omitting the fraction is safe", () => {
+    // Thursday: three whole days behind us plus all of today.
+    const thursday = weeklyScore({
+      ...base,
+      usesTasks: true,
+      daysElapsed: 4,
+      focusTargetMinutesPerDay: 60,
+      focusMinutes: 200,
+      dayFraction: 1,
+    });
+    expect(thursday.parts.find((p) => p.key === "focus")!.detail).toContain(
+      "of 240 focus minutes",
+    );
+    // No dayFraction means "all of today" — the shape every finished week has.
+    const omitted = weeklyScore({
+      ...base,
+      usesTasks: true,
+      daysElapsed: 4,
+      focusTargetMinutesPerDay: 60,
+      focusMinutes: 200,
+    });
+    expect(omitted.score).toBe(thursday.score);
+  });
+});

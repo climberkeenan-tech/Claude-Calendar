@@ -124,6 +124,8 @@ export function proposeBlocks(opts: PlanOptions): PlanResult {
   const maxBlocks = opts.maxBlocksPerTask ?? 4;
   const earliest = opts.now.getTime() + leadMs;
   const MIN = 60_000;
+  /** Candidate start times are considered every half hour inside a slot. */
+  const STEP = 30 * MIN;
 
   const ordered = [...opts.tasks].sort(
     (a, b) =>
@@ -190,21 +192,33 @@ export function proposeBlocks(opts: PlanOptions): PlanResult {
 
     for (const chunk of chunks) {
       const need = chunk * MIN;
-      let best: { slot: Slot; score: number; day: string } | null = null;
+      let best: { slot: Slot; start: number; score: number; day: string } | null = null;
 
       for (const slot of slots) {
         if (slot.end - slot.start < need) continue;
-        if (slot.start + need > dueMs) continue; // must finish before it's due
-        hadRoomSomewhere = true;
-        const day = opts.dayKeyOf(new Date(slot.start));
-        if ((perDay[day] ?? 0) + chunk > perDayCap) continue; // day is full
-        const hour = opts.hourOf(new Date(slot.start));
-        const daysOut = (slot.start - opts.now.getTime()) / 86_400_000;
-        // Prefer good hours, earlier days, and — importantly — a day this
-        // task isn't already sitting on, so long work spreads out.
-        const spreadPenalty = daysUsed.has(day) ? 1.2 : 0;
-        const score = pref[hour] * 2 - daysOut * 0.15 - spreadPenalty;
-        if (!best || score > best.score) best = { slot, score, day };
+        // Score START TIMES INSIDE the slot, not just its opening instant.
+        // Only ever scoring slot.start meant that on a wide-open day — one
+        // free block running from breakfast to bedtime — every session was
+        // pinned to the very start of it, so the learned focus hours the UI
+        // advertises ("you focus best around 8 PM") changed nothing at all.
+        const latest = slot.end - need;
+        const candidates: number[] = [];
+        for (let c = slot.start; c < latest; c += STEP) candidates.push(c);
+        candidates.push(latest); // let a block finish flush with the slot
+
+        for (const cand of candidates) {
+          if (cand + need > dueMs) continue; // must finish before it's due
+          hadRoomSomewhere = true;
+          const day = opts.dayKeyOf(new Date(cand));
+          if ((perDay[day] ?? 0) + chunk > perDayCap) continue; // day is full
+          const hour = opts.hourOf(new Date(cand));
+          const daysOut = (cand - opts.now.getTime()) / 86_400_000;
+          // Prefer good hours, earlier days, and — importantly — a day this
+          // task isn't already sitting on, so long work spreads out.
+          const spreadPenalty = daysUsed.has(day) ? 1.2 : 0;
+          const score = pref[hour] * 2 - daysOut * 0.15 - spreadPenalty;
+          if (!best || score > best.score) best = { slot, start: cand, score, day };
+        }
       }
 
       if (!best) {
@@ -212,7 +226,7 @@ export function proposeBlocks(opts: PlanOptions): PlanResult {
         continue;
       }
 
-      const start = best.slot.start;
+      const start = best.start;
       const end = start + need;
       proposals.push({
         taskId: task.id,
@@ -223,6 +237,14 @@ export function proposeBlocks(opts: PlanOptions): PlanResult {
       });
       perDay[best.day] = (perDay[best.day] ?? 0) + chunk;
       daysUsed.add(best.day);
+      // Placing a block later in a slot must not throw away the time before
+      // it: keep the lead-in as its own slot when it's still long enough to
+      // sit down with, or an evening-preferring plan would silently burn the
+      // whole morning it skipped over.
+      const leadIn = start - buffer;
+      if (leadIn - best.slot.start >= 25 * MIN) {
+        slots.push({ start: best.slot.start, end: leadIn });
+      }
       best.slot.start = end + buffer; // breather before whatever's next
     }
 
@@ -235,7 +257,12 @@ export function proposeBlocks(opts: PlanOptions): PlanResult {
             ? "no_free_time"
             : hadRoomSomewhere
               ? "day_caps_reached"
-              : "no_time_before_due",
+              : // Blaming the deadline for a task that HAS no deadline is
+                // just wrong — nothing was ruled out by a due date. What
+                // actually happened is no gap was long enough to sit down in.
+                task.dueAt
+                ? "no_time_before_due"
+                : "no_free_time",
         missingMinutes: missing,
       });
     }
