@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import ICAL from "ical.js";
 import {
   escapeText,
   foldLine,
@@ -132,8 +133,9 @@ describe("VTIMEZONE from the runtime zone database", () => {
     expect(l).toContain("RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU");
     expect(l.filter((x) => x === "BEGIN:DAYLIGHT")).toHaveLength(1);
     expect(l.filter((x) => x === "BEGIN:STANDARD")).toHaveLength(1);
-    // DTSTART is the LOCAL clock at the change, in the OLD offset.
-    expect(l).toContain("DTSTART:20260308T020000");
+    // DTSTART is the LOCAL clock at the change, in the OLD offset — anchored
+    // at 1970 so the observance covers dates before 2026's first transition.
+    expect(l).toContain("DTSTART:19700308T020000");
   });
 
   it("a zone with no DST gets one observance and no RRULE", () => {
@@ -354,5 +356,125 @@ describe("feed contents", () => {
   it("a title full of separators survives the round trip", () => {
     const l = lines(feed([ev({ title: "Lab, room B; bring notes\\pens" })]));
     expect(l).toContain("SUMMARY:Lab\\, room B\\; bring notes\\\\pens");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The three defects below were all found the same way: by expanding the real
+// builder's output with a real ICS parser instead of reading it. Every one of
+// them renders as a perfectly well-formed file, so line assertions alone had
+// missed all three. These tests expand too.
+// ---------------------------------------------------------------------------
+
+/** Parse a rendered calendar, registering its VTIMEZONEs, and expand a series. */
+function expandTimes(ics: string, index: number, limit = 100): ICAL.Time[] {
+  const comp = new ICAL.Component(ICAL.parse(ics));
+  for (const vt of comp.getAllSubcomponents("vtimezone")) {
+    ICAL.TimezoneService.register(new ICAL.Timezone(vt));
+  }
+  const iter = new ICAL.Event(comp.getAllSubcomponents("vevent")[index]).iterator();
+  const out: ICAL.Time[] = [];
+  let next;
+  while ((next = iter.next()) && out.length < limit) out.push(next);
+  return out;
+}
+
+/** Local wall clocks, as the subscriber sees them on the grid. */
+const expand = (ics: string, index: number, limit = 100): string[] =>
+  expandTimes(ics, index, limit).map((t) => t.toString());
+
+/** The absolute instants those wall clocks resolve to. */
+const expandUtc = (ics: string, index: number, limit = 100): string[] =>
+  expandTimes(ics, index, limit).map((t) => t.toJSDate().toISOString());
+
+describe("what a subscriber's calendar actually computes", () => {
+  // A spring-term class: term starts in January, well before March's DST onset.
+  const spring = ev({
+    startsAt: instantFromWallClock("2026-01-20", "09:00"),
+    endsAt: instantFromWallClock("2026-01-20", "10:00"),
+    rrule: "FREQ=WEEKLY;BYDAY=TU;UNTIL=20261215T090000Z",
+  });
+
+  it("keeps the last meeting of a bounded series", () => {
+    // UNTIL is stored in the app's FLOATING encoding, where the trailing Z is
+    // a lie. Emitted verbatim next to a TZID DTSTART it reads as 09:00 UTC —
+    // 04:00 local — and the 15 Dec class falls the wrong side of the bound.
+    const l = lines(feed([spring]));
+    expect(l).toContain("RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261215T140000Z");
+
+    const dates = expand(feed([spring]), 0);
+    expect(dates).toHaveLength(48);
+    expect(dates.at(-1)).toBe("2026-12-15T09:00:00");
+  });
+
+  it("resolves an event that falls before the year's first DST transition", () => {
+    // Anchoring the observances to the scanned year left January undefined,
+    // and clients fall back to UTC: a 9 AM class arrived at 4 AM.
+    expect(expand(feed([spring]), 0, 1)[0]).toBe("2026-01-20T09:00:00");
+    // The one that matters: 9 AM Eastern in January is 14:00Z. Anchored to
+    // 2026 this came back 09:00Z — the class landed at 4 AM.
+    expect(expandUtc(feed([spring]), 0, 1)[0]).toBe("2026-01-20T14:00:00.000Z");
+  });
+
+  it("an all-day series points at its occurrences with dates, not TZID times", () => {
+    const allDay = ev({
+      id: "e2",
+      allDay: true,
+      startsAt: instantFromWallClock("2026-02-02", "00:00"),
+      endsAt: instantFromWallClock("2026-02-03", "00:00"),
+      rrule: "FREQ=WEEKLY;BYDAY=MO;UNTIL=20260401T000000Z",
+    });
+    const ics = feed(
+      [allDay],
+      [["e2", [{ eventId: "e2", occurrenceDate: "2026-02-09", cancelled: true, completed: false, overrides: null }]]],
+    );
+    const l = lines(ics);
+    // DTSTART is VALUE=DATE, so UNTIL and EXDATE must be dates too — and the
+    // file defines no VTIMEZONE for an all-day-only feed, so a TZID here would
+    // dangle.
+    expect(l).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20260401");
+    expect(l).toContain("EXDATE;VALUE=DATE:20260209");
+    expect(l.some((x) => x.startsWith("EXDATE") && x.includes("TZID"))).toBe(false);
+    expect(l).not.toContain("BEGIN:VTIMEZONE");
+
+    const dates = expand(ics, 0);
+    expect(dates).toContain("2026-02-02");
+    expect(dates).not.toContain("2026-02-09");
+    expect(dates.at(-1)).toBe("2026-03-30");
+  });
+
+  it("an override on an all-day series stays all-day", () => {
+    const ics = feed(
+      [
+        ev({
+          id: "e3",
+          allDay: true,
+          startsAt: instantFromWallClock("2026-02-02", "00:00"),
+          endsAt: instantFromWallClock("2026-02-03", "00:00"),
+          rrule: "FREQ=WEEKLY;BYDAY=MO",
+        }),
+      ],
+      [[
+        "e3",
+        [
+          {
+            eventId: "e3",
+            occurrenceDate: "2026-02-09",
+            cancelled: false,
+            completed: false,
+            overrides: {
+              startsAt: instantFromWallClock("2026-02-10", "00:00").toISOString(),
+              endsAt: instantFromWallClock("2026-02-11", "00:00").toISOString(),
+              title: "Moved a day",
+            },
+          },
+        ],
+      ]],
+    );
+    const l = lines(ics);
+    expect(l).toContain("RECURRENCE-ID;VALUE=DATE:20260209");
+    expect(l).toContain("DTSTART;VALUE=DATE:20260210");
+    expect(l).toContain("DTEND;VALUE=DATE:20260211");
+    expect(l.some((x) => x.includes("TZID"))).toBe(false);
   });
 });

@@ -107,8 +107,18 @@ function observance(
   // DTSTART in a VTIMEZONE is the LOCAL time of the change, expressed in the
   // offset that was in effect just before it.
   const localAtChange = new Date(t.at.getTime() + t.offsetFrom * 60000);
+  // ...but anchored at 1970, not at the year we happened to scan. An
+  // observance only takes effect from its DTSTART, so anchoring to the current
+  // year leaves everything before that year's first transition with no
+  // applicable observance at all — and clients fall back to UTC. A 9 AM class
+  // on 20 January parsed back as 09:00Z instead of 14:00Z: five hours off, for
+  // the whole first stretch of spring term. The yearly RRULE below is derived
+  // from the REAL transition and carries the rule forward from 1970, which is
+  // the shape Google's own feeds publish.
+  const anchored = new Date(localAtChange);
+  anchored.setUTCFullYear(1970);
   const props: IcsProperty[] = [
-    { name: "DTSTART", value: formatLocal(localAtChange), escape: false },
+    { name: "DTSTART", value: formatLocal(anchored), escape: false },
     { name: "TZOFFSETFROM", value: formatOffset(t.offsetFrom), escape: false },
     { name: "TZOFFSETTO", value: formatOffset(t.offsetTo), escape: false },
     { name: "TZNAME", value: t.name },
@@ -124,9 +134,11 @@ function observance(
 }
 
 /**
- * Build a VTIMEZONE for `tz`. `year` should be the current year — the yearly
- * RRULEs then carry the rules forward, which is how every calendar client
- * expects a subscription feed to describe a zone.
+ * Build a VTIMEZONE for `tz`. `year` selects which year's transitions are
+ * SCANNED to learn the rules; the observances themselves are anchored at 1970
+ * and carried forward by yearly RRULEs, so the zone is defined for every date
+ * a feed can contain rather than only for dates after `year`'s first
+ * transition. Pass the current year to describe the rules now in force.
  *
  * A zone with no DST gets a single STANDARD observance and no RRULE. A zone
  * whose rules changed recently is described by the CURRENT rules, which is the
@@ -145,7 +157,9 @@ export function buildVtimezone(tz: string, year: number): IcsComponent {
         {
           name: "STANDARD",
           props: [
-            { name: "DTSTART", value: `${year}0101T000000`, escape: false },
+            // Same reasoning as observance(): a fixed-offset zone still needs
+            // its single observance to predate every event in the feed.
+            { name: "DTSTART", value: "19700101T000000", escape: false },
             { name: "TZOFFSETFROM", value: formatOffset(off), escape: false },
             { name: "TZOFFSETTO", value: formatOffset(off), escape: false },
             { name: "TZNAME", value: zoneAbbreviation(anchor, tz) },

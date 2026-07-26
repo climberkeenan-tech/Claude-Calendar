@@ -17,7 +17,7 @@
  *   not an upcoming deadline.
  * - **Timed events use TZID, never UTC.** See vtimezone.ts.
  */
-import { toFloating } from "@/lib/tz";
+import { fromFloating, toFloating } from "@/lib/tz";
 import { isoDay } from "@/lib/time";
 import {
   formatDateOnly,
@@ -100,15 +100,42 @@ function nextDay(iso: string): string {
 }
 
 /** Exclusive DTEND date for an all-day VEVENT. */
-function allDayEnd(e: FeedEvent, startDay: string): string {
-  if (!e.endsAt) return nextDay(startDay);
-  const wall = toFloating(e.endsAt, e.tz);
+function allDayEnd(endsAt: Date | null, tz: string, startDay: string): string {
+  if (!endsAt) return nextDay(startDay);
+  const wall = toFloating(endsAt, tz);
   const atMidnight =
     wall.getUTCHours() === 0 && wall.getUTCMinutes() === 0 && wall.getUTCSeconds() === 0;
-  const endDay = isoDay(e.endsAt, e.tz);
+  const endDay = isoDay(endsAt, tz);
   const exclusive = atMidnight ? endDay : nextDay(endDay);
   // Never emit a zero-or-negative span: some clients drop the event entirely.
   return exclusive > startDay ? exclusive : nextDay(startDay);
+}
+
+/**
+ * UNTIL leaves the database in this codebase's FLOATING encoding, where the
+ * trailing Z is a lie: `UNTIL=20261215T090000Z` means 9 AM in the event's own
+ * zone. RFC 5545 §3.3.10 says UNTIL beside a TZID DTSTART is a genuine UTC
+ * instant, so shipping the stored value verbatim ends every bounded series
+ * four or five hours early — and since an occurrence lands exactly on the
+ * boundary, it drops the last meeting of the term. Expanding the feed with
+ * ical.js gave 47 classes where the app expands 48.
+ *
+ * Every recurring row is affected: syllabus import bounds each class with
+ * `boundRrule`, and every "this & future" edit writes `withUntil(untilBefore)`.
+ */
+function untilToUtc(rrule: string, tz: string, allDay: boolean): string {
+  return rrule.replace(
+    /UNTIL=(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?/i,
+    (_m, y, mo, d, h, mi, s) => {
+      // A VALUE=DATE DTSTART requires a DATE-valued UNTIL — the same rule from
+      // the other side, and the one case where the time must come OFF.
+      if (allDay) return `UNTIL=${y}${mo}${d}`;
+      const floating = new Date(
+        Date.UTC(+y, +mo - 1, +d, +(h ?? 0), +(mi ?? 0), +(s ?? 0)),
+      );
+      return `UNTIL=${formatUtc(fromFloating(floating, tz))}`;
+    },
+  );
 }
 
 function common(e: FeedEvent, uid: string, now: Date): IcsProperty[] {
@@ -176,7 +203,7 @@ function timedComponents(
     // stretch every all-day event across two days in the subscriber's
     // calendar. Anything not landing on midnight is treated as an inclusive
     // last day and pushed out by one.
-    props.push(dateProps("DTEND", allDayEnd(e, day)));
+    props.push(dateProps("DTEND", allDayEnd(e.endsAt, e.tz, day)));
   } else {
     props.push(timedProps("DTSTART", e.startsAt, e.tz));
     props.push(
@@ -186,21 +213,38 @@ function timedComponents(
 
   const out: IcsComponent[] = [];
   if (e.rrule) {
-    props.push({ name: "RRULE", value: e.rrule, escape: false });
+    props.push({
+      name: "RRULE",
+      value: untilToUtc(e.rrule, e.tz, e.allDay),
+      escape: false,
+    });
+
+    // EXDATE and RECURRENCE-ID must carry the SAME value type as DTSTART
+    // (RFC 5545 §3.8.5.1). An all-day master is VALUE=DATE, so pointing at its
+    // occurrences with TZID date-times both breaks that rule and names a
+    // timezone the file never defines — all-day events are deliberately left
+    // out of the VTIMEZONE set below, so the TZID dangled.
+    const seriesTime = formatLocal(toFloating(e.startsAt, e.tz)).slice(9);
+    const pointAt = (name: string, dayIso: string): IcsProperty =>
+      e.allDay
+        ? { name, params: { VALUE: "DATE" }, value: formatDateOnly(dayIso), escape: false }
+        : {
+            name,
+            params: { TZID: e.tz },
+            value: `${formatDateOnly(dayIso)}T${seriesTime}`,
+            escape: false,
+          };
 
     const cancelled = occurrences.filter((o) => o.cancelled);
     if (cancelled.length > 0) {
-      // One EXDATE property per excluded slot, at the SERIES time of day —
-      // a bare date would be ignored by anything that expects a date-time.
-      const wall = toFloating(e.startsAt, e.tz);
-      const hhmmss = formatLocal(wall).slice(9);
+      // One EXDATE property listing every excluded slot. Timed series pin the
+      // series time of day, since a bare date is ignored by anything expecting
+      // a date-time.
       props.push({
-        name: "EXDATE",
-        params: { TZID: e.tz },
+        ...pointAt("EXDATE", cancelled[0].occurrenceDate),
         value: cancelled
-          .map((o) => `${formatDateOnly(o.occurrenceDate)}T${hhmmss}`)
+          .map((o) => String(pointAt("EXDATE", o.occurrenceDate).value))
           .join(","),
-        escape: false,
       });
     }
 
@@ -209,23 +253,24 @@ function timedComponents(
       const start = o.overrides.startsAt ? new Date(o.overrides.startsAt) : null;
       const end = o.overrides.endsAt ? new Date(o.overrides.endsAt) : null;
       if (!start) continue;
-      const wall = toFloating(e.startsAt, e.tz);
-      const hhmmss = formatLocal(wall).slice(9);
       const override: IcsProperty[] = common(
         { ...e, title: o.overrides.title ?? e.title, location: o.overrides.location ?? e.location },
         uid,
         now,
       );
-      override.push({
-        name: "RECURRENCE-ID",
-        params: { TZID: e.tz },
-        value: `${formatDateOnly(o.occurrenceDate)}T${hhmmss}`,
-        escape: false,
-      });
-      override.push(timedProps("DTSTART", start, e.tz));
-      override.push(
-        timedProps("DTEND", end ?? new Date(start.getTime() + 30 * 60000), e.tz),
-      );
+      override.push(pointAt("RECURRENCE-ID", o.occurrenceDate));
+      if (e.allDay) {
+        // An override on an all-day series stays all-day: a VALUE=DATE master
+        // with a timed replacement is the same value-type mismatch again.
+        const day = isoDay(start, e.tz);
+        override.push(dateProps("DTSTART", day));
+        override.push(dateProps("DTEND", allDayEnd(end, e.tz, day)));
+      } else {
+        override.push(timedProps("DTSTART", start, e.tz));
+        override.push(
+          timedProps("DTEND", end ?? new Date(start.getTime() + 30 * 60000), e.tz),
+        );
+      }
       out.push({ name: "VEVENT", props: override });
     }
   }
