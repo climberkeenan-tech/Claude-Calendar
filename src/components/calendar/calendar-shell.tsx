@@ -106,7 +106,11 @@ export function CalendarShell({
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-2xl text-ink">{heading}</h1>
-        <div className="flex items-center gap-2">
+        {/* Wraps too. The row above wrapped but this group didn't, so on a
+            390 px screen the four view buttons plus ← Today → came to 415 px
+            and pushed the whole PAGE sideways — the one thing a phone layout
+            must never do. Now the nav buttons drop to their own line. */}
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex overflow-hidden rounded-(--radius-sm) border border-border">
             {VIEWS.map((v) => (
               <button

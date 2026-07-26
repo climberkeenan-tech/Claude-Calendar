@@ -117,3 +117,21 @@ You can also run the whole app against that database — a loopback
 `DATABASE_URL` automatically switches the client onto a plain `pg` driver
 (see ARCHITECTURE.md, "Two test suites"). Google sign-in still applies, so
 add your address to `ALLOWED_EMAILS`.
+
+### The UI sweep
+
+`scripts/verify-ui.mjs` walks every route in light and dark, at desktop and
+phone widths, runs [axe](https://github.com/dequelabs/axe-core) on each, and
+reports anything broken, any accessibility violation, any page that scrolls
+sideways, and any console error. It also writes a screenshot per page.
+
+It signs in the way a real Google login does — minting an Auth.js session token
+with the app's own `AUTH_SECRET` — so nothing in the app is stubbed or bypassed;
+the allowlist, the JWT callbacks and the layout redirect all behave exactly as
+they ship. Because it seeds rows, it **refuses to start** unless `DATABASE_URL`
+points at a loopback host.
+
+```bash
+npm run build && npm start &          # with the local DATABASE_URL from above
+node scripts/verify-ui.mjs            # screenshots land in /tmp/phase12
+```

@@ -34,7 +34,15 @@ export function ClaudeAccess({
           Let Claude read and manage this calendar in conversation. Generate a
           token, then connect from <span className="text-ink">Claude Code</span>:
         </p>
-        <pre className="overflow-x-auto rounded-(--radius-sm) border border-border bg-surface-raised p-3 font-mono text-xs text-ink-muted">
+        {/* tabIndex so the command can be scrolled without a mouse — it's wider
+            than a phone, and an unfocusable scroll region hides the half of the
+            line you actually need to copy. */}
+        <pre
+          tabIndex={0}
+          role="region"
+          aria-label="Claude Code connection command"
+          className="overflow-x-auto rounded-(--radius-sm) border border-border bg-surface-raised p-3 font-mono text-xs text-ink-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
           {`claude mcp add high-point-os ${appUrl}/api/mcp \\\n  -t http -H "Authorization: Bearer <your token>"`}
         </pre>
 

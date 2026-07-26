@@ -242,8 +242,17 @@ export function TimeGrid({
         })}
       </div>
 
-      {/* Scrollable time grid */}
-      <div ref={scrollRef} className="max-h-[70dvh] overflow-y-auto">
+      {/* Scrollable time grid. tabIndex makes it reachable from the keyboard:
+          a scrollable region that can't be focused can't be scrolled without a
+          mouse, which is WCAG 2.1 scrollable-region-focusable and, more to the
+          point, leaves the whole day inaccessible to anyone using a keyboard. */}
+      <div
+        ref={scrollRef}
+        tabIndex={0}
+        role="region"
+        aria-label="Hourly schedule"
+        className="max-h-[70dvh] overflow-y-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
+      >
         <div className="grid" style={{ gridTemplateColumns: `3.5rem 1fr` }}>
           {/* Hour gutter */}
           <div className="relative" style={{ height: 24 * HOUR_PX }}>
