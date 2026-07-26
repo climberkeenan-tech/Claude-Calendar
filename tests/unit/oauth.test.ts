@@ -59,8 +59,18 @@ describe("PKCE", () => {
   it("refuses the plain method outright — OAuth 2.1 removed it", () => {
     // With `plain`, anyone who intercepts the redirect has everything they
     // need; the whole point of requiring PKCE is that they don't.
-    expect(verifyPkce(VERIFIER, VERIFIER, "plain")).toBe(false);
+    //
+    // This has to present a CORRECT S256 challenge with the wrong method.
+    // Asserting verifyPkce(V, V, "plain") === false proves nothing: those two
+    // strings differ, so it returns false even with the method check deleted —
+    // which mutation testing confirmed. Only this assertion fails when the
+    // guard is removed.
+    expect(verifyPkce(VERIFIER, challengeFor(VERIFIER), "plain")).toBe(false);
     expect(verifyPkce(VERIFIER, challengeFor(VERIFIER), "S256")).toBe(true);
+    // Every other method name is refused too, including an empty one.
+    for (const method of ["", "PLAIN", "s256", "S512", "none"]) {
+      expect(verifyPkce(VERIFIER, challengeFor(VERIFIER), method)).toBe(false);
+    }
   });
 
   it("enforces the verifier's length and character set", () => {
