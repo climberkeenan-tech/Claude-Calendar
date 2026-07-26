@@ -155,7 +155,7 @@ need the public HTTPS URL. Part of the post-deploy pass in Phase 12.
 
 ---
 
-## Phase 12 — Final Polish
+## Phase 12 — Final Polish ✅
 
 **Deliverables:** screen-by-screen review with fixes; workflow simplification pass (remove anything unused); **UI consistency sweep, animation review, and responsiveness re-check** (re-verified here even though Phase 10 passed — Phases 11–12 changes count too); performance + reliability sweep; full code review; accessibility re-audit; documentation set: user guide, installation/setup instructions, `.env` reference, future roadmap, testing checklist; version 1.0 tag.
 
@@ -167,6 +167,29 @@ need the public HTTPS URL. Part of the post-deploy pass in Phase 12.
 - AI continuously improves the schedule ✓ (insight quality compared with empty vs. populated `user_patterns` — the learning loop must demonstrably change the output)
 - **Enjoyable to use** ✓ (a week of real use with a short daily journal: "did I open it willingly or avoid it?" — avoidance is a bug report)
 - Commercial-grade polish; feels like an official Claude companion ✓ (screen-by-screen review)
+
+**What the final pass actually did, and found.** Until Phase 12 the app had
+never been run outside Vercel: `neon-http` speaks Neon's HTTP protocol, not the
+Postgres wire protocol, so a local database was unreachable and nothing below
+the pure-logic tests had ever executed. Making the driver hostname-dependent
+(see ARCHITECTURE, "Two test suites") fixed that, and then three sweeps ran
+against a real database:
+
+1. **Integration tests** — 18, over the window predicates, the kind invariants,
+   per-user isolation, series expansion, and the subscription path end to end.
+2. **`scripts/verify-ui.mjs`** — all eight routes, light and dark, desktop and
+   phone, with axe on each. First run: two real defects. `/calendar` pushed the
+   whole page sideways on a 390 px screen, and two scrollable regions could not
+   be reached from the keyboard. Second run: 32 page loads, zero broken, zero
+   accessibility violations, zero horizontal scroll, zero console errors.
+3. **`scripts/smoke-flows.mjs`** — types into the real dialog and checks the
+   database agrees. First run found that **quick add returned 500 on every
+   save**: a type re-export from a `"use server"` module survived Next's action
+   transform as a runtime reference. It compiled, type-checked, built clean and
+   passed 284 tests. Only invoking it showed anything.
+
+Also fixed here: the floating quick-add button covered the last card on every
+page, and a habit's name collapsed to a single glyph in its dashboard card.
 
 ---
 

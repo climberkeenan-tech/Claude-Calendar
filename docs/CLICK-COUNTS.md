@@ -9,6 +9,13 @@ Typing doesn't count. Picking a value inside a native date/time picker counts
 as one. Keyboard shortcuts are listed separately because they're a *shortcut*,
 not the guaranteed path — every row below is reachable with the mouse alone.
 
+**Five of these rows now have a mechanical check.** `scripts/smoke-flows.mjs`
+drives the real UI and performs exactly the clicks claimed here — quick add in
+two, completing a task in one, a habit check-in in one, starting and stopping
+the timer in one each — and then verifies the database actually changed. If a
+path grows a click, the script's selectors stop matching. The rest of the table
+is still counted by hand.
+
 **Counted on a phone too.** The bottom bar carries four tabs plus **More**, so
 Import, Analytics, Settings, and Sign out each cost one extra tap there. Both
 numbers appear wherever they differ. (An earlier version of this table counted
