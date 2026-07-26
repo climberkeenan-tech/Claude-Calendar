@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { activityLog, categories, events } from "@/lib/db/schema";
 import { dayBounds } from "@/lib/time";
+import { isoDayInTz } from "@/lib/tz";
 import {
   getCalendarWindow,
   getHabitsWeek,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/db/queries/calendar";
 
 const DAY = 24 * 60 * 60 * 1000;
+const TZ = "America/New_York";
 
 export type HabitWeek = {
   id: string;
@@ -121,7 +123,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     const anchor = i.startsAt ?? i.dueAt;
     if (!anchor) continue;
     const iso = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/New_York",
+      timeZone: TZ,
     }).format(anchor);
     monthDots[iso] = (monthDots[iso] ?? 0) + 1;
   }
@@ -137,7 +139,11 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     monthDots,
     current,
     next,
-    weekStartIso: weekStart.toISOString(),
+    // A DATE, not an instant. Everything named `...Iso` in this codebase is
+    // YYYY-MM-DD, and the habit strip feeds it straight to shiftDay(), which
+    // throws "Invalid time value" on a full timestamp — the dashboard crashed
+    // outright for anyone with a single habit.
+    weekStartIso: isoDayInTz(weekStart, TZ),
   };
 }
 

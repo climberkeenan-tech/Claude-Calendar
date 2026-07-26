@@ -159,6 +159,14 @@ export function instantFromWallClockIso(
 
 /** Shift an ISO date by whole calendar days (noon anchor — DST-proof). */
 export function shiftDay(dayIso: string, days: number): string {
+  // Passing a full instant here produced "Invalid time value" from deep inside
+  // toISOString, which took a crashed dashboard to trace back. Say what the
+  // contract is at the point it is broken.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayIso)) {
+    throw new TypeError(
+      `shiftDay expects a YYYY-MM-DD date, received ${JSON.stringify(dayIso)}`,
+    );
+  }
   const d = new Date(`${dayIso}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
