@@ -11,7 +11,7 @@
  * undoes a whole plan.
  */
 import { revalidatePath } from "next/cache";
-import { and, eq, gte, inArray, like, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, like, lt } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { activityLog, categories, events, reminders } from "@/lib/db/schema";
@@ -477,7 +477,17 @@ export async function acceptPlan(input: unknown): Promise<AcceptResult> {
   type Batchable = Parameters<typeof db.batch>[0][number];
   const statements: Batchable[] = [];
   if (sweepIds.length > 0) {
-    statements.push(db.delete(events).where(inArray(events.id, sweepIds)));
+    // Cancel, don't delete. The review screen offers Undo and then says
+    // "Undone — nothing was kept", but a hard delete put these permanently
+    // beyond undoPlan's reach, so replanning quietly destroyed the blocks it
+    // swept. Every calendar query already excludes cancelled rows, so they
+    // stay just as invisible while remaining restorable.
+    statements.push(
+      db
+        .update(events)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(inArray(events.id, sweepIds)),
+    );
   }
   statements.push(db.insert(events).values(eventRows));
   statements.push(db.insert(reminders).values(reminderRows));
@@ -488,7 +498,8 @@ export async function acceptPlan(input: unknown): Promise<AcceptResult> {
       type: "week_planned",
       entityType: "plan",
       entityId: batchId,
-      data: { blocks: eventRows.length, swept: sweepIds.length },
+      // The ids, not just the count — undoPlan needs to know what to put back.
+      data: { blocks: eventRows.length, swept: sweepIds.length, sweptIds: sweepIds },
     }),
   );
   await db.batch(statements as [Batchable, ...Batchable[]]);
@@ -505,23 +516,62 @@ export async function undoPlan(batchId: string): Promise<void> {
   const userId = await requireUserId();
   const clean = batchId.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 16);
   if (!clean) return;
-  await db
-    .delete(events)
+
+  // What did accepting this plan sweep aside? Undo has to put it back, or the
+  // "nothing was kept" the review screen shows is a lie about the blocks
+  // replanning cancelled.
+  const planned = await db
+    .select({ data: activityLog.data })
+    .from(activityLog)
     .where(
       and(
-        eq(events.userId, userId),
-        eq(events.source, "ai_suggestion"),
-        like(events.sourceId, `plan:${clean}:%`),
+        eq(activityLog.userId, userId),
+        eq(activityLog.type, "week_planned"),
+        eq(activityLog.entityId, clean),
       ),
+    )
+    .limit(1);
+  const sweptIds = (
+    (planned[0]?.data as { sweptIds?: unknown } | null)?.sweptIds ?? []
+  ) as string[];
+
+  type Batchable = Parameters<typeof db.batch>[0][number];
+  const statements: Batchable[] = [
+    db
+      .delete(events)
+      .where(
+        and(
+          eq(events.userId, userId),
+          eq(events.source, "ai_suggestion"),
+          like(events.sourceId, `plan:${clean}:%`),
+        ),
+      ),
+  ];
+  if (sweptIds.length > 0) {
+    statements.push(
+      db
+        .update(events)
+        .set({ status: "scheduled", updatedAt: new Date() })
+        .where(and(eq(events.userId, userId), inArray(events.id, sweptIds))),
     );
-  await db.insert(activityLog).values({
-    id: crypto.randomUUID(),
-    userId,
-    type: "plan_undone",
-    entityType: "plan",
-    entityId: clean,
-    data: {},
-  });
+  }
+  statements.push(
+    db.insert(activityLog).values({
+      id: crypto.randomUUID(),
+      userId,
+      type: "plan_undone",
+      entityType: "plan",
+      entityId: clean,
+      data: { restored: sweptIds.length },
+    }),
+  );
+  // Removing this plan's blocks and restoring what it displaced is one change
+  // — a half-applied undo leaves the week neither planned nor as it was.
+  await db.batch(statements as [Batchable, ...Batchable[]]);
+
+  // Restored blocks need their reminders back on the schedule.
+  for (const id of sweptIds) await syncJobsForEvent(id);
+
   refresh();
 }
 
@@ -570,9 +620,14 @@ export async function triageOverdue(
       id: events.id,
       title: events.title,
       estimatedMinutes: events.estimatedMinutes,
-      categoryName: sql<string | null>`null`,
+      // Actually joined, not a hardcoded null. effectiveEstimate keys its
+      // fallback off this (Exams 120, Homework 60, Classes 45), so a null made
+      // "Shrink it" halve the generic 45 for an exam that should have started
+      // from two hours — the one button whose whole job is a realistic number.
+      categoryName: categories.name,
     })
     .from(events)
+    .leftJoin(categories, eq(events.categoryId, categories.id))
     .where(
       and(eq(events.id, taskId), eq(events.userId, userId), eq(events.kind, "task")),
     );

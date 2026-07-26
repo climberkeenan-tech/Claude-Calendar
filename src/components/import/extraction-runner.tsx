@@ -40,7 +40,17 @@ export function ExtractionRunner({
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        if (!res.ok && body.error) setError(body.error);
+        // Any failure has to say so. Gating on `body.error` meant a response
+        // that wasn't JSON at all — a gateway timeout, an HTML error page —
+        // set nothing, and the spinner kept promising "Still working…" over an
+        // import that had already stopped.
+        if (!res.ok) {
+          setError(
+            body.error ??
+              `Extraction failed (${res.status}). Refresh to try again.`,
+          );
+          return;
+        }
         router.refresh();
       } catch {
         setError("Lost the connection while extracting — reload to retry.");

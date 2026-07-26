@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db/client";
 import {
@@ -184,18 +184,56 @@ export async function setEventReminders(
   const userId = await requireUserId();
   const v = offsetsSchema.parse(input);
   await assertOwned(userId, v.eventId);
-  await db.delete(reminders).where(eq(reminders.eventId, v.eventId));
-  if (v.offsets.length > 0) {
-    await db.insert(reminders).values(
-      [...new Set(v.offsets)].map((offsetMinutes) => ({
-        id: crypto.randomUUID(),
-        eventId: v.eventId,
-        offsetMinutes,
-        // Push first; an unacknowledged push falls back to email (§7) —
-        // both-at-once would just train inbox blindness.
-        channels: ["push"],
-      })),
+
+  // Touch only what actually changed. notification_jobs cascades from
+  // reminders, and that table holds the sent bell entries and any active
+  // snooze — so deleting every row and re-inserting meant nudging one
+  // reminder from 30 minutes to 60 also erased the event's notification
+  // history and quietly un-snoozed it. Absolute reminders aren't part of this
+  // editor's model and are left alone rather than collected as collateral.
+  const existing = await db
+    .select({ id: reminders.id, offsetMinutes: reminders.offsetMinutes })
+    .from(reminders)
+    .where(eq(reminders.eventId, v.eventId));
+
+  const wanted = new Set(v.offsets);
+  const kept = new Set<number>();
+  const removeIds: string[] = [];
+  for (const r of existing) {
+    if (r.offsetMinutes === null) continue; // absolute — not ours to manage
+    // First row for a wanted offset stays; anything else goes, which also
+    // collapses duplicates the old delete-everything path used to dedupe.
+    if (wanted.has(r.offsetMinutes) && !kept.has(r.offsetMinutes)) {
+      kept.add(r.offsetMinutes);
+    } else {
+      removeIds.push(r.id);
+    }
+  }
+  const addOffsets = [...wanted].filter((o) => !kept.has(o));
+
+  type Batchable = Parameters<typeof db.batch>[0][number];
+  const statements: Batchable[] = [];
+  if (removeIds.length > 0) {
+    statements.push(db.delete(reminders).where(inArray(reminders.id, removeIds)));
+  }
+  if (addOffsets.length > 0) {
+    statements.push(
+      db.insert(reminders).values(
+        addOffsets.map((offsetMinutes) => ({
+          id: crypto.randomUUID(),
+          eventId: v.eventId,
+          offsetMinutes,
+          // Push first; an unacknowledged push falls back to email (§7) —
+          // both-at-once would just train inbox blindness.
+          channels: ["push"],
+        })),
+      ),
     );
+  }
+  // One change, so a failure between the removal and the addition can't leave
+  // an event with no reminders at all.
+  if (statements.length > 0) {
+    await db.batch(statements as [Batchable, ...Batchable[]]);
   }
   await syncJobsForEvent(v.eventId);
   refresh();

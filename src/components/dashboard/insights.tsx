@@ -63,7 +63,17 @@ export function InsightsDigest({ initial }: { initial: InsightRow[] }) {
                       disabled={pending}
                       onClick={() =>
                         startTransition(async () => {
-                          const r = await applyInsight(ins.id);
+                          // A throw inside startTransition is swallowed, so
+                          // without this the button just did nothing at all —
+                          // no error, no change, nothing to retry against.
+                          let r: Awaited<ReturnType<typeof applyInsight>>;
+                          try {
+                            r = await applyInsight(ins.id);
+                          } catch {
+                            setError("Couldn't do that — check your connection and try again.");
+                            setTimeout(() => setError(null), 4000);
+                            return;
+                          }
                           if (r.error) {
                             setError(r.error);
                             setTimeout(() => setError(null), 4000);
@@ -82,8 +92,21 @@ export function InsightsDigest({ initial }: { initial: InsightRow[] }) {
                     variant="ghost"
                     disabled={pending}
                     onClick={() => {
+                      // Hide it immediately — dismissing should feel instant —
+                      // but put it back if the write didn't land, rather than
+                      // leaving the card gone here and still there on reload.
                       setItems((l) => l.filter((i) => i.id !== ins.id));
-                      startTransition(() => dismissInsight(ins.id));
+                      startTransition(async () => {
+                        try {
+                          await dismissInsight(ins.id);
+                        } catch {
+                          setItems((l) =>
+                            l.some((i) => i.id === ins.id) ? l : [...l, ins],
+                          );
+                          setError("Couldn't dismiss that — try again.");
+                          setTimeout(() => setError(null), 4000);
+                        }
+                      });
                     }}
                   >
                     Not now
