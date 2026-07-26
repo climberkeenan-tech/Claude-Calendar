@@ -6,15 +6,17 @@ import { events, focusSessions, userPatterns } from "@/lib/db/schema";
 import { getCalendarWindow } from "@/lib/db/queries/calendar";
 import { createItemForUser, localToInstant } from "@/lib/items/create";
 import { completeItemForUser } from "@/lib/items/complete";
+import { startSessionFor, stopRunningFor } from "@/lib/items/focus";
 import { verifyBearer } from "@/lib/mcp/tokens";
 import { verifyAccessToken } from "@/lib/oauth/store";
 import { getWeekScore } from "@/lib/analytics/summary";
 import {
   freeByDay,
   getBusyBlocks,
+  getSchedulingPrefs,
   shiftIso,
 } from "@/lib/scheduling/context";
-import { isoDayInTz } from "@/lib/tz";
+import { fromFloating, isoDayInTz } from "@/lib/tz";
 import { dayBounds, fmtShortDay, fmtTime, relativeDue } from "@/lib/time";
 import { syncJobsForEvent } from "@/lib/notifications/scheduler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
@@ -27,12 +29,31 @@ export const maxDuration = 60;
  * /api/oauth (claude.ai and Claude Desktop custom connectors, Phase 11).
  * Every tool wraps the same shared cores as the UI. */
 
+const TZ = "America/New_York";
+
 const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });
 
 function userIdOf(authInfo: AuthInfo | undefined): string {
   const id = authInfo?.extra?.userId;
   if (typeof id !== "string") throw new Error("Unauthorized");
   return id;
+}
+
+/**
+ * A connector that asked for `calendar.read` is shown exactly one consent
+ * line — "Read your schedule…" — so it must not be able to create, complete,
+ * reschedule, or start a timer. Scopes were being issued and consented to but
+ * never checked, which made that consent screen a promise the server didn't
+ * keep. Personal Claude Code tokens carry both scopes and are unaffected.
+ */
+function requireWrite(authInfo: AuthInfo | undefined): string {
+  const userId = userIdOf(authInfo);
+  if (!(authInfo?.scopes ?? []).includes("calendar.write")) {
+    throw new Error(
+      "This connection is read-only. Reconnect and approve write access to change the calendar.",
+    );
+  }
+  return userId;
 }
 
 const handler = createMcpHandler(
@@ -109,7 +130,7 @@ const handler = createMcpHandler(
         habitTargetPerWeek: z.number().int().min(1).max(7).optional(),
       },
       async (args, { authInfo }) => {
-        const userId = userIdOf(authInfo);
+        const userId = requireWrite(authInfo);
         const result = await createItemForUser(userId, {
           title: args.title,
           kind: args.kind,
@@ -142,7 +163,7 @@ const handler = createMcpHandler(
           .optional(),
       },
       async ({ eventId, completed, occurrenceDate }, { authInfo }) => {
-        const userId = userIdOf(authInfo);
+        const userId = requireWrite(authInfo);
         const r = await completeItemForUser(
           userId,
           eventId,
@@ -166,7 +187,7 @@ const handler = createMcpHandler(
         dueLocal: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
       },
       async ({ eventId, dueLocal }, { authInfo }) => {
-        const userId = userIdOf(authInfo);
+        const userId = requireWrite(authInfo);
         const rows = await db
           .select({ id: events.id, kind: events.kind, title: events.title })
           .from(events)
@@ -189,18 +210,18 @@ const handler = createMcpHandler(
       "Start the study timer (one session at a time).",
       { kind: z.enum(["study", "work", "reading", "other"]).optional() },
       async ({ kind }, { authInfo }) => {
-        const userId = userIdOf(authInfo);
-        await db
-          .update(focusSessions)
-          .set({ endedAt: new Date() })
-          .where(and(eq(focusSessions.userId, userId), sql`${focusSessions.endedAt} is null`));
-        await db.insert(focusSessions).values({
-          id: crypto.randomUUID(),
-          userId,
-          kind: kind ?? "study",
-          startedAt: new Date(),
-        });
-        return text(`Timer started (${kind ?? "study"}).`);
+        const userId = requireWrite(authInfo);
+        // The shared core, not a local copy: this route used to close the
+        // running session with endedAt alone and no durationMinutes, so asking
+        // Claude to start a new timer erased the minutes of the one it closed
+        // — and those minutes feed the weekly score.
+        const stopped = await stopRunningFor(userId);
+        await startSessionFor(userId, { kind: kind ?? "study" });
+        return text(
+          stopped
+            ? `Timer started (${kind ?? "study"}). Saved the previous session: ${stopped.minutes} min of ${stopped.kind}.`
+            : `Timer started (${kind ?? "study"}).`,
+        );
       },
     );
 
@@ -209,38 +230,35 @@ const handler = createMcpHandler(
       "Stop the running study timer and save the session.",
       {},
       async (_args, { authInfo }) => {
-        const userId = userIdOf(authInfo);
-        const rows = await db
-          .select()
-          .from(focusSessions)
-          .where(and(eq(focusSessions.userId, userId), sql`${focusSessions.endedAt} is null`));
-        if (rows.length === 0) return text("No timer is running.");
-        const now = new Date();
-        for (const s of rows) {
-          const minutes = Math.max(1, Math.round((now.getTime() - s.startedAt.getTime()) / 60000));
-          await db
-            .update(focusSessions)
-            .set({ endedAt: now, durationMinutes: minutes })
-            .where(eq(focusSessions.id, s.id));
-        }
-        return text("Timer stopped and saved.");
+        const userId = requireWrite(authInfo);
+        const stopped = await stopRunningFor(userId);
+        if (!stopped) return text("No timer is running.");
+        return text(`Timer stopped — ${stopped.minutes} min of ${stopped.kind} saved.`);
       },
     );
 
     server.tool(
       "get_free_time",
-      "Open blocks over the next N days (default 3), waking hours only, with 15-minute transition buffers already applied — the same engine the in-app planner uses.",
+      "Open blocks over the next N days (default 3), inside the user's own waking hours and with their transition buffer already applied — the same engine the in-app planner uses.",
       { days: z.number().int().min(1).max(14).optional() },
       async ({ days }, { authInfo }) => {
         const userId = userIdOf(authInfo);
         const now = new Date();
         const span = days ?? 3;
-        const todayIso = isoDayInTz(now, "America/New_York");
-        const rangeEnd = new Date(
-          new Date(`${shiftIso(todayIso, span)}T00:00:00Z`).getTime(),
+        const todayIso = isoDayInTz(now, TZ);
+        // Floating time -> a real instant. Left raw, midnight "UTC" is 8 PM
+        // the evening BEFORE on campus, so the busy query stopped hours early
+        // and the last evening's commitments were reported as free.
+        const rangeEnd = fromFloating(
+          new Date(`${shiftIso(todayIso, span)}T00:00:00Z`),
+          TZ,
         );
         const busy = await getBusyBlocks(userId, now, rangeEnd);
-        const byDay = freeByDay(busy, todayIso, span, now);
+        // The user's OWN day window and buffer, the same ones /plan uses —
+        // not the defaults. Answering with 08:00–22:00 when they set
+        // 09:00–17:00 is a wrong answer delivered confidently.
+        const prefs = await getSchedulingPrefs(userId);
+        const byDay = freeByDay(busy, todayIso, span, now, prefs);
         const lines = byDay.map((d) => {
           if (d.blocks.length === 0) return `${d.dayIso}: nothing open.`;
           const slots = d.blocks

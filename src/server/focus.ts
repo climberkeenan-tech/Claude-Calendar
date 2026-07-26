@@ -7,6 +7,7 @@ import { db } from "@/lib/db/client";
 import { activityLog, focusSessions } from "@/lib/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { ownedCourseId } from "@/lib/db/ownership";
+import { startSessionFor, stopRunningFor } from "@/lib/items/focus";
 
 export type RunningSession = {
   id: string;
@@ -42,20 +43,16 @@ export async function startFocusSession(
   const userId = await requireUserId();
   const v = startSchema.parse(input);
   // One running session at a time: close any orphan first (crash-safe).
-  await stopRunning(userId);
-  await db.insert(focusSessions).values({
-    id: crypto.randomUUID(),
-    userId,
+  await startSessionFor(userId, {
     kind: v.kind,
     courseId: await ownedCourseId(userId, v.courseId),
-    startedAt: new Date(),
   });
   revalidatePath("/");
 }
 
 export async function stopFocusSession(): Promise<void> {
   const userId = await requireUserId();
-  const stopped = await stopRunning(userId);
+  const stopped = await stopRunningFor(userId);
   if (stopped) {
     await db.insert(activityLog).values({
       id: crypto.randomUUID(),
@@ -69,26 +66,3 @@ export async function stopFocusSession(): Promise<void> {
   revalidatePath("/");
 }
 
-async function stopRunning(
-  userId: string,
-): Promise<{ id: string; minutes: number; kind: string } | null> {
-  const rows = await db
-    .select()
-    .from(focusSessions)
-    .where(and(eq(focusSessions.userId, userId), isNull(focusSessions.endedAt)));
-  if (rows.length === 0) return null;
-  const now = new Date();
-  let last: { id: string; minutes: number; kind: string } | null = null;
-  for (const s of rows) {
-    const minutes = Math.max(
-      1,
-      Math.round((now.getTime() - s.startedAt.getTime()) / 60000),
-    );
-    await db
-      .update(focusSessions)
-      .set({ endedAt: now, durationMinutes: minutes })
-      .where(eq(focusSessions.id, s.id));
-    last = { id: s.id, minutes, kind: s.kind };
-  }
-  return last;
-}
