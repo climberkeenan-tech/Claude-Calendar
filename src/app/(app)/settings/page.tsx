@@ -6,7 +6,11 @@ import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { NotificationsPanel } from "@/components/settings/notifications-panel";
 import { ClaudeAccess } from "@/components/settings/claude-access";
 import { SchedulingPanel } from "@/components/settings/scheduling-panel";
+import { CalendarFeed } from "@/components/settings/calendar-feed";
+import { ConnectedApps } from "@/components/settings/connected-apps";
 import { listApiTokens } from "@/server/tokens";
+import { getFeedToken } from "@/server/feed";
+import { listConnections } from "@/server/oauth";
 import { getSchedulingPrefs } from "@/lib/scheduling/context";
 import { requireUserId } from "@/lib/auth";
 import {
@@ -22,12 +26,15 @@ export default async function SettingsPage() {
   const session = await auth();
   const initialDark = (await cookies()).get("theme")?.value === "dark";
   const userId = await requireUserId();
-  const [notifSettings, pushDevices, tokens, schedPrefs] = await Promise.all([
-    getNotificationSettings(),
-    countPushSubscriptions(),
-    listApiTokens(),
-    getSchedulingPrefs(userId),
-  ]);
+  const [notifSettings, pushDevices, tokens, schedPrefs, feedToken] =
+    await Promise.all([
+      getNotificationSettings(),
+      countPushSubscriptions(),
+      listApiTokens(),
+      getSchedulingPrefs(userId),
+      getFeedToken(),
+    ]);
+  const connections = await listConnections();
   const appUrl =
     process.env.APP_URL ??
     (process.env.VERCEL_PROJECT_PRODUCTION_URL
@@ -79,7 +86,11 @@ export default async function SettingsPage() {
         <NotificationsPanel initial={notifSettings} pushDevices={pushDevices} />
       ) : null}
 
+      <CalendarFeed initialToken={feedToken} appUrl={appUrl} />
+
       <ClaudeAccess tokens={tokens} appUrl={appUrl} />
+
+      <ConnectedApps connections={connections} />
     </div>
   );
 }

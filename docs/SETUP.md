@@ -56,9 +56,30 @@ DATABASE_URL="<your Neon connection string>" npm run db:migrate
 
 This applies every checked-in SQL migration in order (all verified against Postgres 16 in dev). Re-run this same command after pulling any future update that adds a migration — it only applies what's missing.
 
+> If `db:migrate` appears to hang, apply the files directly instead:
+> `psql "$DATABASE_URL" -f drizzle/0000_*.sql` and so on, in filename order.
+
 ## 6. Sign in
 
 Open your Vercel URL → **Continue with Google**. First sign-in automatically creates your account, settings, and the six default categories. Any other Google account is refused.
+
+## 7. Connect it to Claude and to your other calendars — optional, ~3 min
+
+All of this lives in **Settings** once you're signed in.
+
+**Claude Code** — generate a token under *Claude access (MCP)* and run the
+command it shows you.
+
+**claude.ai or Claude Desktop** — add a custom connector pointing at
+`https://YOUR-PROJECT.vercel.app/api/mcp`. It registers itself, sends you
+through Google sign-in, and asks you to approve. No token to copy. Connections
+show up under *Connected apps*, one click to disconnect.
+
+**Your phone's calendar** — copy the link under *Subscribe from another
+calendar* and paste it into Google Calendar (*Other calendars → From URL*),
+Apple Calendar (*File → New Calendar Subscription*), or Outlook (*Add calendar
+→ Subscribe from web*). It's read-only, and anyone with the link can read your
+calendar — **Reset link** kills every subscription instantly if it ever leaks.
 
 ---
 

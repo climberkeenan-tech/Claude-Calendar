@@ -6,6 +6,7 @@ import { runEscalationForUser } from "@/lib/notifications/escalation";
 import { derivePatterns } from "@/lib/analytics/patterns";
 import { rollupUser } from "@/lib/analytics/rollup";
 import { expireInsights, runInsightsForUser } from "@/lib/ai/insights";
+import { pruneOauth } from "@/lib/oauth/store";
 
 export const maxDuration = 300;
 
@@ -29,6 +30,14 @@ export async function GET(req: Request): Promise<Response> {
     report.maintenance = await dailyMaintenance();
   } catch (err) {
     report.maintenance = `failed: ${String(err)}`;
+  }
+
+  try {
+    // Expired authorization codes and long-dead tokens (Phase 11).
+    await pruneOauth(new Date());
+    report.oauthPrune = "ok";
+  } catch (err) {
+    report.oauthPrune = `failed: ${String(err)}`;
   }
 
   const allUsers = await db.select({ id: users.id }).from(users);

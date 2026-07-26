@@ -396,7 +396,7 @@ The `source_excerpt` field (the text span the item came from) makes review trust
 
 ## 12. Accessible directly from Claude — the MCP server
 
-`/api/mcp` implements MCP over Streamable HTTP (official TypeScript SDK + `mcp-handler` adapter). Auth is staged to match what Claude clients actually support (§5): **v1 = bearer token → Claude Code** (which supports custom headers) ships first; **claude.ai and Claude Desktop custom connectors require MCP OAuth** (they have no static-header field), which is a scheduled follow-up deliverable. Once connected:
+`/api/mcp` implements MCP over Streamable HTTP (official TypeScript SDK + `mcp-handler` adapter). Auth was staged to match what Claude clients actually support (§5): **v1 = bearer token → Claude Code** (which supports custom headers) shipped in Phase 6; **claude.ai and Claude Desktop custom connectors require MCP OAuth** (they have no static-header field), which Phase 11 added — this app is now an OAuth 2.1 authorization server (RFC 8414 + RFC 9728 discovery, RFC 7591 dynamic client registration, authorization-code + mandatory PKCE S256, one-hour access tokens with refresh rotation, and a consent screen behind the normal Google sign-in). Both token types reach the same tools. See `docs/INTEGRATIONS.md`. Once connected:
 
 > "What's my day look like?" · "Add gym every Monday at 5" · "Mark the bio homework done" · "When am I free Thursday afternoon?" · "How was my week?"
 
@@ -413,6 +413,21 @@ Initial tool surface (fast, JSON-out, wrapping the same server actions as the UI
 | `get_productivity_summary(period)` | Stats + score |
 
 This is the highest-leverage "feels like a Claude product" feature: the calendar becomes something you can *talk to* from any Claude surface, with zero extra UI to build or maintain.
+
+### Outbound: the ICS subscription feed (Phase 11)
+
+`/api/calendar/<token>` publishes a read-only RFC 5545 feed for Google, Apple,
+and Outlook. Recurring series pass their `RRULE` through rather than being
+expanded, so the subscriber's client owns expansion and "every Monday" never
+decays into a list that runs out; cancelled occurrences become `EXDATE` and
+edited ones a second `VEVENT` sharing the `UID` with a `RECURRENCE-ID` — the
+RFC's own mechanism for the three edit modes the app already models. Timed
+events carry `TZID` plus a `VTIMEZONE` generated from the runtime's zone data,
+never UTC, because a UTC-anchored `RRULE` slides an hour at every DST change.
+Correctness is checked twice: unit tests on what we write, and a second suite
+that parses the output back with `ical.js` (the implementation behind
+Thunderbird) and asserts a 9 AM class is still 9 AM local after the clocks
+change. Full behaviour and limits in `docs/INTEGRATIONS.md`.
 
 ---
 

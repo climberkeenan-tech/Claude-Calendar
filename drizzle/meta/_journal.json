@@ -15,6 +15,20 @@
       "when": 1785017540261,
       "tag": "0001_sturdy_silver_samurai",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785024469796,
+      "tag": "0002_messy_hulk",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785025230044,
+      "tag": "0003_thankful_mesmero",
+      "breakpoints": true
     }
   ]
 }

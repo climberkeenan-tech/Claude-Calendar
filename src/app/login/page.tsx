@@ -3,9 +3,22 @@ import { auth, signIn } from "@/lib/auth";
 
 export const metadata = { title: "Sign in" };
 
-export default async function LoginPage() {
+/** Only same-origin paths may be returned to — "//evil.com" is a URL, not a
+ * path, and would turn sign-in into an open redirect. */
+function safeNext(raw: string | undefined): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
+  return raw;
+}
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
+  const target = safeNext(next);
   const session = await auth();
-  if (session?.userId) redirect("/");
+  if (session?.userId) redirect(target);
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6">
@@ -28,7 +41,7 @@ export default async function LoginPage() {
       <form
         action={async () => {
           "use server";
-          await signIn("google", { redirectTo: "/" });
+          await signIn("google", { redirectTo: target });
         }}
       >
         <button

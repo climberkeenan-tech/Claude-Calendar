@@ -115,8 +115,9 @@ export function ClaudeAccess({
         </Button>
         <ActionError message={guard.error} className="text-xs text-danger-ink" />
         <p className="text-xs text-ink-faint">
-          claude.ai and Claude Desktop connectors need OAuth — scheduled for
-          Phase 11. Claude Code works today.
+          This token is for Claude Code. For claude.ai and Claude Desktop, add
+          a custom connector pointing at the same URL — they sign in with
+          Google instead of a token, and appear under Connected apps below.
         </p>
       </CardBody>
     </Card>

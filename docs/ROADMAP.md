@@ -128,13 +128,30 @@ Phase 12.
 
 ---
 
-## Phase 11 — Future Integrations
+## Phase 11 — Future Integrations ✅
 
 Deliberately thin — real value now, speculation never. The sync-adapter abstraction gets designed **when the first real two-way integration is chosen**, not before.
 
 **Deliverables:** **ICS feed export** (read-only subscribe URL — instantly usable from Google/Apple/Outlook calendars); **Canvas ICS-import evaluation** (Canvas exposes per-user calendar feeds — likely the cheapest real integration for HPU coursework); **MCP OAuth** (OAuth 2.1 + dynamic client registration via `mcp-handler`'s auth wrapper) so claude.ai and Claude Desktop custom connectors can finally connect — completing the "accessible from Claude everywhere" promise; a short written integration guide covering the brief's full candidate list (Google/Apple/Outlook two-way, Canvas/Blackboard/Brightspace, Notion, Todoist, Drive/Dropbox/OneDrive, Apple Reminders, HPU systems if APIs exist).
 
 **Verify:** ICS export validates and subscribes cleanly in Google Calendar + Apple Calendar; the app connected as a claude.ai custom connector via OAuth with every MCP tool exercised; Canvas evaluation documented with a go/no-go recommendation.
+
+**Done.** ICS export ships with a revocable subscribe URL; correctness is
+checked twice — unit tests on what we write, plus a second suite that parses
+the output back with `ical.js` (Thunderbird's implementation) and asserts a
+9 AM class is still 9 AM local after the clocks change. A mutation check
+confirmed those tests actually exercise our generated VTIMEZONE. The feed was
+also built end-to-end from real Postgres rows and re-parsed. MCP OAuth is a
+full OAuth 2.1 authorization server: RFC 8414 + 9728 discovery, RFC 7591
+dynamic registration, mandatory PKCE S256, single-use codes, refresh rotation,
+consent behind Google sign-in, and a Connected apps panel. 18 store-level
+checks pass against real Postgres including the concurrent code-replay race.
+`docs/INTEGRATIONS.md` carries the Canvas go/no-go (**GO**, one-way ICS
+import) and the full candidate-list assessment.
+
+**Still open for the deployed site:** subscribing the feed in real Google and
+Apple Calendar, and adding the app as a real claude.ai custom connector — both
+need the public HTTPS URL. Part of the post-deploy pass in Phase 12.
 
 ---
 

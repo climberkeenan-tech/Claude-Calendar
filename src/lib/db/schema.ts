@@ -114,6 +114,11 @@ export const userSettings = pgTable("user_settings", {
   showProductivityScore: boolean("show_productivity_score")
     .notNull()
     .default(true),
+  /** Secret in the read-only ICS subscribe URL (Phase 11). Stored in the
+   * clear, unlike api_tokens, because the URL has to be re-displayable —
+   * a calendar client can't be handed a header, so the capability lives in
+   * the link itself. Rotating it instantly breaks every subscription. */
+  calendarFeedToken: text("calendar_feed_token").unique(),
 });
 
 // ---------------------------------------------------------------------------
@@ -455,3 +460,76 @@ export const apiTokens = pgTable("api_tokens", {
     .notNull()
     .defaultNow(),
 });
+
+// ---------------------------------------------------------------------------
+// OAuth 2.1 authorization server (Phase 11)
+//
+// Claude Code connects with a long-lived bearer token from `api_tokens`.
+// claude.ai and Claude Desktop custom connectors can't: they perform Dynamic
+// Client Registration and an authorization-code + PKCE flow, so this app has
+// to BE an authorization server. These three tables are the whole of it.
+// ---------------------------------------------------------------------------
+
+/** RFC 7591 dynamic client registration. Public clients only — no secrets. */
+export const oauthClients = pgTable("oauth_clients", {
+  id: text("id").primaryKey(), // the client_id handed back to the client
+  clientName: text("client_name"),
+  /** Exact-match allowlist. A loose match here is the classic OAuth hole. */
+  redirectUris: text("redirect_uris").array().notNull(),
+  grantTypes: text("grant_types").array().notNull(),
+  scope: text("scope"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Authorization codes: single-use, short-lived, PKCE-bound. */
+export const oauthCodes = pgTable(
+  "oauth_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClients.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    redirectUri: text("redirect_uri").notNull(),
+    codeChallenge: text("code_challenge").notNull(),
+    codeChallengeMethod: text("code_challenge_method").notNull(),
+    scope: text("scope").notNull(),
+    /** RFC 8707 audience — the MCP resource this code may buy a token for. */
+    resource: text("resource"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (t) => [index("oauth_codes_expires_idx").on(t.expiresAt)],
+);
+
+/** Access and refresh tokens, hashed at rest like every other credential. */
+export const oauthTokens = pgTable(
+  "oauth_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClients.id, { onDelete: "cascade" }),
+    accessTokenHash: text("access_token_hash").notNull().unique(),
+    refreshTokenHash: text("refresh_token_hash").unique(),
+    scope: text("scope").notNull(),
+    resource: text("resource"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("oauth_tokens_user_idx").on(t.userId),
+    index("oauth_tokens_expires_idx").on(t.expiresAt),
+  ],
+);

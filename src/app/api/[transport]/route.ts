@@ -7,6 +7,7 @@ import { getCalendarWindow } from "@/lib/db/queries/calendar";
 import { createItemForUser, localToInstant } from "@/lib/items/create";
 import { completeItemForUser } from "@/lib/items/complete";
 import { verifyBearer } from "@/lib/mcp/tokens";
+import { verifyAccessToken } from "@/lib/oauth/store";
 import { getWeekScore } from "@/lib/analytics/summary";
 import {
   freeByDay,
@@ -21,7 +22,9 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 export const maxDuration = 60;
 
 /** "Accessible directly from Claude" (ARCHITECTURE §12): MCP over Streamable
- * HTTP, bearer-token auth (Claude Code v1; claude.ai OAuth lands Phase 11).
+ * HTTP. Two ways in, both bearer tokens: a long-lived `hpos_` token pasted
+ * into Claude Code, or an OAuth access token from the authorization server in
+ * /api/oauth (claude.ai and Claude Desktop custom connectors, Phase 11).
  * Every tool wraps the same shared cores as the UI. */
 
 const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });
@@ -317,16 +320,35 @@ const authedHandler = withMcpAuth(
   handler,
   async (_req, token) => {
     if (!token) return undefined;
+
+    // OAuth access tokens (claude.ai / Claude Desktop) carry their own scopes.
+    if (token.startsWith("hpat_")) {
+      const grant = await verifyAccessToken(token);
+      if (!grant) return undefined;
+      return {
+        token,
+        clientId: "oauth",
+        scopes: grant.scope.split(" "),
+        extra: { userId: grant.userId },
+      };
+    }
+
+    // Long-lived personal token (Claude Code).
     const userId = await verifyBearer(token);
     if (!userId) return undefined;
     return {
       token,
       clientId: "high-point-os",
-      scopes: ["user"],
+      scopes: ["calendar.read", "calendar.write"],
       extra: { userId },
     };
   },
-  { required: true },
+  {
+    required: true,
+    // Sent in the WWW-Authenticate challenge so an unauthenticated client
+    // knows where to discover the authorization server.
+    resourceMetadataPath: "/.well-known/oauth-protected-resource",
+  },
 );
 
 export { authedHandler as GET, authedHandler as POST, authedHandler as DELETE };
