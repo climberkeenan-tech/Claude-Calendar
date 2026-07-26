@@ -60,7 +60,15 @@ export async function decideAuthorization(
 /** Live connections, newest first — one row per client that still has a
  * usable token. */
 export async function listConnections(): Promise<
-  { clientId: string; clientName: string | null; lastUsedAt: Date | null; createdAt: Date }[]
+  {
+    clientId: string;
+    clientName: string | null;
+    lastUsedAt: Date | null;
+    createdAt: Date;
+    /** Live tokens this client holds. Normally 1; more means it authorized
+     * again without the old grant being revoked, which is worth seeing. */
+    sessions: number;
+  }[]
 > {
   const userId = await requireUserId();
   const rows = await db
@@ -75,10 +83,16 @@ export async function listConnections(): Promise<
     .where(and(eq(oauthTokens.userId, userId), isNull(oauthTokens.revokedAt)))
     .orderBy(desc(oauthTokens.createdAt));
 
-  // One client can hold several tokens after refreshes; show the newest.
-  const byClient = new Map<string, (typeof rows)[number]>();
-  for (const r of rows) if (!byClient.has(r.clientId)) byClient.set(r.clientId, r);
-  return [...byClient.values()];
+  // One client can hold several tokens after refreshes; show the newest. The
+  // count rides along rather than being swallowed by the dedupe — a second
+  // live grant you didn't expect is exactly the thing worth noticing here.
+  const byClient = new Map<string, { row: (typeof rows)[number]; sessions: number }>();
+  for (const r of rows) {
+    const seen = byClient.get(r.clientId);
+    if (seen) seen.sessions += 1;
+    else byClient.set(r.clientId, { row: r, sessions: 1 });
+  }
+  return [...byClient.values()].map(({ row, sessions }) => ({ ...row, sessions }));
 }
 
 /** Disconnect: revokes every token that client holds for this user. */

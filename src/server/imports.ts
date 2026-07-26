@@ -33,6 +33,7 @@ import {
   SCOPE_RULES,
   statStoredFile,
 } from "@/lib/files/storage";
+import { attachmentBlobsFor, reclaimBlobs } from "@/lib/files/reclaim";
 import type { StoredExtraction } from "@/lib/import/schema";
 
 const TZ = "America/New_York";
@@ -370,6 +371,15 @@ export async function undoImport(importId: string): Promise<ApproveResult> {
   // this course that did not come from this import", so the answer doesn't
   // depend on the delete below having already happened. That ordering is what
   // lets the whole undo go out as one batch.
+  // Attachment files outlive the rows that reference them (event_id is ON
+  // DELETE CASCADE), so an undone import used to leave every upload hanging on
+  // the storage bill with nothing pointing at it. Read now, reclaim after.
+  const doomed = await db
+    .select({ id: events.id })
+    .from(events)
+    .where(and(eq(events.userId, userId), eq(events.sourceId, importId)));
+  const orphanedBlobs = await attachmentBlobsFor(doomed.map((e) => e.id));
+
   let dropCourse = false;
   if (extraction.createdCourseId) {
     const foreign = await db
@@ -429,6 +439,7 @@ export async function undoImport(importId: string): Promise<ApproveResult> {
   // Either the whole import is undone or none of it is — a half-undo leaves
   // events the review screen says were removed.
   await db.batch(statements as [Batchable, ...Batchable[]]);
+  await reclaimBlobs(orphanedBlobs);
 
   refresh();
   return { ok: true };

@@ -21,6 +21,7 @@ import {
   acknowledgeJobsForEvent,
   syncJobsForEvent,
 } from "@/lib/notifications/scheduler";
+import { attachmentBlobsFor, reclaimBlobs } from "@/lib/files/reclaim";
 
 const refresh = () => {
   revalidatePath("/");
@@ -513,7 +514,13 @@ export async function deleteEvent(input: z.infer<typeof deleteSchema>): Promise<
   const v = deleteSchema.parse(input);
   const event = await ownedEvent(userId, v.eventId);
 
+  // Read the attachment URLs while the rows still exist — the delete below
+  // cascades them away, and the files would otherwise be left with nothing
+  // pointing at them. Reclaimed after the row is gone, never before.
+  let orphanedBlobs: string[] = [];
+
   if (!event.rrule || v.scope === "series" || !v.occurrenceDate) {
+    orphanedBlobs = await attachmentBlobsFor([event.id]);
     await db.delete(events).where(eq(events.id, event.id));
   } else if (v.scope === "single") {
     await db
@@ -552,9 +559,11 @@ export async function deleteEvent(input: z.infer<typeof deleteSchema>): Promise<
           ),
       ]);
     } else {
+      orphanedBlobs = await attachmentBlobsFor([event.id]);
       await db.delete(events).where(eq(events.id, event.id));
     }
   }
+  await reclaimBlobs(orphanedBlobs);
   await log(userId, "event_deleted", event.id, { title: event.title, scope: v.scope });
   // Row deletion cascades jobs away; for surviving series (single/future
   // scopes) this re-derives the job set. Orphaned QStash alarms no-op at

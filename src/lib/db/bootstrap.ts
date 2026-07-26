@@ -78,15 +78,22 @@ async function repairDefaults(userId: string): Promise<void> {
     .from(categories)
     .where(eq(categories.userId, userId));
   if (existingCats.length === 0) {
-    await db.insert(categories).values(
-      DEFAULT_CATEGORIES.map((c, i) => ({
-        id: crypto.randomUUID(),
-        userId,
-        name: c.name,
-        color: c.color,
-        isDefault: true,
-        position: i,
-      })),
-    );
+    await db
+      .insert(categories)
+      .values(
+        DEFAULT_CATEGORIES.map((c, i) => ({
+          id: crypto.randomUUID(),
+          userId,
+          name: c.name,
+          color: c.color,
+          isDefault: true,
+          position: i,
+        })),
+      )
+      // The count above is a check-then-act: two sign-in callbacks landing
+      // together both see zero and both insert. There is already a unique
+      // index on (user_id, name), so the loser would throw mid-sign-in rather
+      // than duplicate — let it no-op instead.
+      .onConflictDoNothing({ target: [categories.userId, categories.name] });
   }
 }

@@ -15,7 +15,10 @@ import { JSON_HEADERS } from "@/lib/oauth/metadata";
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
-  redirect_uris: z.array(z.string()).min(1).max(10),
+  // Length-capped per entry, not just per array. Registration is open by
+  // necessity, so an uncapped string is an invitation to store megabytes per
+  // request; a real redirect URI is well under 200 characters.
+  redirect_uris: z.array(z.string().max(2000)).min(1).max(10),
   client_name: z.string().max(200).optional(),
   grant_types: z.array(z.string()).optional(),
   response_types: z.array(z.string()).optional(),

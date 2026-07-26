@@ -18,6 +18,7 @@ export type Connection = {
   clientName: string | null;
   lastUsedAt: Date | null;
   createdAt: Date;
+  sessions: number;
 };
 
 export function ConnectedApps({ connections }: { connections: Connection[] }) {
@@ -40,6 +41,14 @@ export function ConnectedApps({ connections }: { connections: Connection[] }) {
               <li key={c.clientId} className="flex items-center gap-3 py-2">
                 <span className="min-w-0 flex-1 truncate text-sm text-ink">
                   {c.clientName ?? "MCP client"}
+                  {c.sessions > 1 ? (
+                    // Worth surfacing rather than hiding behind the dedupe: a
+                    // grant you don't remember approving is the thing you'd
+                    // want to disconnect.
+                    <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-xs text-ink-muted">
+                      {c.sessions} sessions
+                    </span>
+                  ) : null}
                 </span>
                 <span className="shrink-0 text-xs text-ink-faint">
                   {c.lastUsedAt

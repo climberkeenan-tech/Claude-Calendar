@@ -97,21 +97,58 @@ export async function issueTokens(input: {
   };
 }
 
-/** Refresh-token rotation: the old row is revoked as the new one is issued. */
+/**
+ * Refresh-token rotation: the old row is revoked as the new one is issued.
+ *
+ * The revoke and the match are ONE statement, so two requests racing with the
+ * same token can only ever rotate it once — the loser matches zero rows.
+ */
 export async function rotateRefreshToken(refreshToken: string, clientId: string, now: Date) {
+  const hash = sha256(refreshToken);
   const rows = await db
     .update(oauthTokens)
     .set({ revokedAt: now })
     .where(
       and(
-        eq(oauthTokens.refreshTokenHash, sha256(refreshToken)),
+        eq(oauthTokens.refreshTokenHash, hash),
         eq(oauthTokens.clientId, clientId),
         isNull(oauthTokens.revokedAt),
       ),
     )
     .returning();
   const old = rows[0];
-  if (!old) return null;
+  if (!old) {
+    // Reuse detection (OAuth 2.1 / RFC 9700 §4.14.2). Presenting a refresh
+    // token that has ALREADY been rotated means either the real client
+    // replayed it or somebody else kept a copy — and there is no way to tell
+    // which from here. Simply failing this one request leaves a thief holding
+    // whatever they took, so the whole family goes: every live token this user
+    // has with this client is revoked and both parties have to sign in again.
+    const replayed = await db
+      .select({ userId: oauthTokens.userId })
+      .from(oauthTokens)
+      .where(
+        and(
+          eq(oauthTokens.refreshTokenHash, hash),
+          eq(oauthTokens.clientId, clientId),
+        ),
+      )
+      .limit(1);
+    const owner = replayed[0]?.userId;
+    if (owner) {
+      await db
+        .update(oauthTokens)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(oauthTokens.userId, owner),
+            eq(oauthTokens.clientId, clientId),
+            isNull(oauthTokens.revokedAt),
+          ),
+        );
+    }
+    return null;
+  }
   return issueTokens({
     userId: old.userId,
     clientId: old.clientId,
