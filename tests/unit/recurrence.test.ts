@@ -261,3 +261,62 @@ describe("carryUntil — the bound survives a this-and-future split", () => {
     expect(carryUntil(open, wallClockToInstant("2026-10-06", "10:00", TZ), TZ)).toBe(open);
   });
 });
+
+describe("endsAt is EXCLUSIVE at the window boundary", () => {
+  // An all-day event runs to the NEXT local midnight, which IS the next day's
+  // window start. `end >= windowStart` therefore counted yesterday's all-day
+  // event as part of today. Every UI surface re-buckets by day and hid it, but
+  // MCP get_agenda reads this directly — asking Claude "what's on today"
+  // listed yesterday's holiday.
+  const at = (d: string, t: string) => wallClockToInstant(d, t, TZ);
+  const today = at("2026-09-15", "00:00");
+  const tomorrow = at("2026-09-16", "00:00");
+  const count = (e: SeriesEvent) => expandEvent(e, [], today, tomorrow).length;
+
+  it("excludes an event that ENDS exactly when the window opens", () => {
+    expect(
+      count({
+        id: "yesterday",
+        startsAt: at("2026-09-14", "00:00"),
+        endsAt: today,
+        rrule: null,
+        tz: TZ,
+      }),
+    ).toBe(0);
+    // Same boundary, reached through the recurring path.
+    expect(
+      count({
+        id: "weekly",
+        startsAt: at("2026-09-08", "00:00"),
+        endsAt: at("2026-09-09", "00:00"),
+        rrule: "FREQ=WEEKLY;BYDAY=MO",
+        tz: TZ,
+      }),
+    ).toBe(0);
+  });
+
+  it("still includes everything that genuinely overlaps", () => {
+    // Today's own all-day event.
+    expect(
+      count({ id: "today", startsAt: today, endsAt: tomorrow, rrule: null, tz: TZ }),
+    ).toBe(1);
+    // A meeting that started last night and is still running.
+    expect(
+      count({
+        id: "overnight",
+        startsAt: at("2026-09-14", "23:00"),
+        endsAt: at("2026-09-15", "01:00"),
+        rrule: null,
+        tz: TZ,
+      }),
+    ).toBe(1);
+  });
+
+  it("keeps a zero-duration item sitting exactly on the boundary", () => {
+    // endsAt null means end === start, so a bare `end > windowStart` would
+    // drop this one. The second clause of overlaps() exists for it.
+    expect(
+      count({ id: "midnight", startsAt: today, endsAt: null, rrule: null, tz: TZ }),
+    ).toBe(1);
+  });
+});

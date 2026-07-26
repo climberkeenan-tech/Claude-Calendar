@@ -55,6 +55,23 @@ function buildRule(event: SeriesEvent): RRule {
  * Expand one event's occurrences that intersect [windowStart, windowEnd).
  * Non-recurring events yield zero or one occurrence.
  */
+/**
+ * Does [start, end) reach into a window beginning at `windowStart`?
+ *
+ * `endsAt` is EXCLUSIVE everywhere in this codebase — an all-day event runs to
+ * the NEXT local midnight — so `end >= windowStart` counted yesterday's all-day
+ * event as part of today: its end IS today's midnight. Every UI surface
+ * re-buckets by day and hid it, but MCP get_agenda reads this directly, so
+ * asking Claude "what's on today" listed yesterday's holiday.
+ *
+ * The second clause is not redundant: an event with no `endsAt` has
+ * `end === start`, so a zero-duration item sitting exactly on the window's
+ * opening instant would fail `end > windowStart` and be dropped.
+ */
+function overlaps(start: Date, end: Date, windowStart: Date): boolean {
+  return end > windowStart || start >= windowStart;
+}
+
 export function expandEvent(
   event: SeriesEvent,
   overrides: OccurrenceOverride[],
@@ -88,7 +105,7 @@ export function expandEvent(
 
   if (!event.rrule) {
     const end = event.endsAt ?? event.startsAt;
-    if (event.startsAt < windowEnd && end >= windowStart) {
+    if (event.startsAt < windowEnd && overlaps(event.startsAt, end, windowStart)) {
       const one = emit(event.startsAt);
       return one ? [one] : [];
     }
@@ -108,7 +125,7 @@ export function expandEvent(
 
   const inWindow = (occ: ExpandedOccurrence) => {
     const end = occ.endsAt ?? occ.startsAt;
-    return occ.startsAt < windowEnd && end >= windowStart;
+    return occ.startsAt < windowEnd && overlaps(occ.startsAt, end, windowStart);
   };
 
   const out: ExpandedOccurrence[] = [];

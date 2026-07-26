@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, ne, or } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { categories, courses, events, occurrences } from "@/lib/db/schema";
 import { expandEvent, type OccurrenceOverride } from "@/lib/calendar/recurrence";
@@ -64,7 +64,11 @@ export async function getCalendarWindow(
           isNull(events.rrule),
           isNotNull(events.startsAt),
           lt(events.startsAt, end),
-          or(gte(events.endsAt, start), gte(events.startsAt, start)),
+          // endsAt is EXCLUSIVE, so gte() pulled in anything ending exactly
+          // at the window'''s opening instant — every all-day event from the
+          // previous day. The second clause still catches a zero-duration
+          // event sitting right on the boundary.
+          or(gt(events.endsAt, start), gte(events.startsAt, start)),
         ),
       ),
     db
