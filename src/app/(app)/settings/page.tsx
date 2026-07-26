@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -35,11 +35,24 @@ export default async function SettingsPage() {
       getFeedToken(),
     ]);
   const connections = await listConnections();
+  // Everything on this page built from appUrl is meant to be COPIED — the
+  // calendar subscription link and the `claude mcp add` command. A placeholder
+  // domain there is worse than no link: it looks real, pastes cleanly into
+  // Google Calendar, and silently never syncs. Falling back to the request's
+  // own host means the link always points at wherever you actually are, which
+  // also makes it right on preview deployments and on localhost.
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  const proto =
+    h.get("x-forwarded-proto") ??
+    (host && /^(localhost|127\.|\[::1\])/.test(host) ? "http" : "https");
   const appUrl =
     process.env.APP_URL ??
     (process.env.VERCEL_PROJECT_PRODUCTION_URL
       ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : "https://your-app.vercel.app");
+      : host
+        ? `${proto}://${host}`
+        : "https://your-app.vercel.app");
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
