@@ -4,7 +4,7 @@
  * history size. The math lives in rollup-core.ts (pure, fixture-tested);
  * this file only gathers inputs and persists results.
  */
-import { and, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   categories,
@@ -78,6 +78,7 @@ export async function gatherDayInputs(
           eq(events.kind, "task"),
           gte(events.completedAt, bounds.dayStart),
           lt(events.completedAt, bounds.dayEnd),
+          ne(events.status, "cancelled"),
         ),
       ),
     db
@@ -89,6 +90,13 @@ export async function gatherDayInputs(
           eq(events.kind, "task"),
           gte(events.dueAt, bounds.dayStart),
           lt(events.dueAt, bounds.dayEnd),
+          // A task dropped from the overdue triage is cancelled, not missed.
+          // Without this the app tells you the board is clear — getCalendarWindow
+          // and the openOverdueNow count both exclude cancelled — while the
+          // score keeps charging you for a blown deadline, permanently: a
+          // finalized daily_stats row is never recomputed. Using the app's own
+          // "Drop" button cost 20 points a week.
+          ne(events.status, "cancelled"),
         ),
       ),
     getCalendarWindow(userId, bounds.dayStart, bounds.dayEnd),

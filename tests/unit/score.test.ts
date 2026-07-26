@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  excludeBacklogClears,
   weeklyScore,
   winsAndNextAction,
   type WeekScoreInput,
@@ -167,5 +168,102 @@ describe("winsAndNextAction", () => {
     const { parts } = weeklyScore(input);
     const { nextAction } = winsAndNextAction(input, parts);
     expect(nextAction).toMatch(/keep it rolling/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The scorer is what turns a week of rows into one number the student is shown,
+// so the one property it must never violate is that doing the right thing
+// cannot lower it. Two shipped inputs broke that; these pin the shape of the
+// inputs the fix now feeds in.
+// ---------------------------------------------------------------------------
+
+describe("the score never punishes doing the right thing", () => {
+  const active: WeekScoreInput = {
+    ...base,
+    usesTasks: true,
+    focusMinutes: 120,
+    focusTargetMinutesPerDay: 60,
+    habits: [{ done: 3, target: 5 }],
+    daysElapsed: 3,
+  };
+
+  it("folds a backlog clear out of both sides of the ratio", () => {
+    // The raw week sums for "task due last Sunday, finished this Monday":
+    // it lands in the day rows as a completion AND as late, while the due day
+    // that would offset it sits outside the window.
+    const raw = { completed: 1, late: 1 };
+    expect(excludeBacklogClears(raw, 1)).toEqual({ completed: 0, late: 0 });
+    // Work genuinely done this week is untouched.
+    expect(excludeBacklogClears({ completed: 4, late: 1 }, 1)).toEqual({
+      completed: 3,
+      late: 0,
+    });
+    // Never below zero, however the counts disagree.
+    expect(excludeBacklogClears({ completed: 1, late: 0 }, 3)).toEqual({
+      completed: 0,
+      late: 0,
+    });
+  });
+
+  it("so clearing old backlog is neutral, where it used to cost 34 points", () => {
+    const ignored = weeklyScore(active).score;
+    const folded = excludeBacklogClears({ completed: 1, late: 1 }, 1);
+    const cleared = weeklyScore({
+      ...active,
+      tasksCompleted: folded.completed,
+      tasksCompletedLate: folded.late,
+    }).score;
+    expect(cleared).toBe(ignored);
+
+    // What shipped: the same week, scored without the fold.
+    const unfixed = weeklyScore({
+      ...active,
+      tasksCompleted: 1,
+      tasksCompletedLate: 1,
+    }).score;
+    expect(unfixed!).toBeLessThan(ignored!);
+    expect(ignored).toBe(86);
+    expect(unfixed).toBe(52);
+  });
+
+  it("a task dropped in triage must never reach tasksMissed", () => {
+    // "Drop" sets status='cancelled'. getCalendarWindow and openOverdueNow both
+    // hide it, so the app says the board is clear; the rollup's `due` query had
+    // no status filter, so the score charged a blown deadline forever — a
+    // finalized daily_stats row is never recomputed. The filter itself is SQL
+    // (`ne(events.status, "cancelled")`); this pins what it is worth.
+    const clean = weeklyScore({ ...active, tasksCompleted: 1 });
+    expect(clean.parts.find((p) => p.key === "onTime")?.detail).toBe(
+      "1 of 1 finished on time",
+    );
+    const counted = weeklyScore({
+      ...active,
+      tasksCompleted: 1,
+      tasksMissed: 1,
+    });
+    expect(counted.parts.find((p) => p.key === "onTime")?.detail).toBe(
+      "1 of 2 finished on time",
+    );
+    expect(counted.score!).toBeLessThan(clean.score!);
+    expect(clean.score! - counted.score!).toBe(20);
+  });
+
+  it("finishing one more task on time can never lower the score", () => {
+    for (const missed of [0, 1, 3]) {
+      for (const done of [0, 1, 2, 5]) {
+        const before = weeklyScore({
+          ...active,
+          tasksCompleted: done,
+          tasksMissed: missed,
+        }).score;
+        const after = weeklyScore({
+          ...active,
+          tasksCompleted: done + 1,
+          tasksMissed: missed,
+        }).score;
+        expect(after!).toBeGreaterThanOrEqual(before!);
+      }
+    }
   });
 });

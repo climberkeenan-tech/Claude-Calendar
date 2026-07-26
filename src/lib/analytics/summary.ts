@@ -18,6 +18,7 @@ import { fromFloating, isoDayInTz } from "@/lib/tz";
 import { computeDayLive, needsRollup, rollupUser } from "./rollup";
 import type { DayStatsRow } from "./rollup-core";
 import {
+  excludeBacklogClears,
   weeklyScore,
   winsAndNextAction,
   type ScorePart,
@@ -160,7 +161,7 @@ async function buildWeekScoreInput(
     new Date(`${shiftIso(todayIso, 1)}T00:00:00Z`),
     TZ,
   );
-  const [habitRows, overdueRows, anyTask, lateAfterDueDay] = await Promise.all([
+  const [habitRows, overdueRows, anyTask, lateAfterDueDay, backlogCleared] = await Promise.all([
     getHabitsWeek(userId, weekStart, weekEnd),
     db
       .select({ n: sql<number>`count(*)::int` })
@@ -197,6 +198,24 @@ async function buildWeekScoreInput(
           sql`(${events.completedAt} at time zone ${TZ})::date > (${events.dueAt} at time zone ${TZ})::date`,
         ),
       ),
+    // Backlog: due BEFORE this week, cleared during it. The day rows count it
+    // as a completion AND as late, but the due day that would offset it sits
+    // outside the window — denom 1, onTime 0, and the 40 % component scored a
+    // flat zero. Clearing one old task dropped a week from 86 to 52, and the
+    // summary then said "Due dates keep slipping past". Ignoring the task
+    // outscored doing it.
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(events)
+      .where(
+        and(
+          eq(events.userId, userId),
+          eq(events.kind, "task"),
+          lt(events.dueAt, weekStart),
+          gte(events.completedAt, weekStart),
+          lt(events.completedAt, windowEnd),
+        ),
+      ),
   ]);
 
   const settingsRows = await db
@@ -210,12 +229,19 @@ async function buildWeekScoreInput(
     done: h.doneDates.length,
     target: h.target,
   }));
+  const onTime = excludeBacklogClears(
+    {
+      completed: sum((r) => r.tasksCompleted),
+      late: sum((r) => r.tasksCompletedLate),
+    },
+    backlogCleared[0]?.n ?? 0,
+  );
 
   return {
     habits,
     input: {
-      tasksCompleted: sum((r) => r.tasksCompleted),
-      tasksCompletedLate: sum((r) => r.tasksCompletedLate),
+      tasksCompleted: onTime.completed,
+      tasksCompletedLate: onTime.late,
       tasksMissed: Math.max(
         0,
         sum((r) => r.tasksOverdue) - (lateAfterDueDay[0]?.n ?? 0),

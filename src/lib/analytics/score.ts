@@ -50,6 +50,30 @@ export type WeekScore = {
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
+/**
+ * Remove tasks that came due BEFORE this week but were cleared during it from
+ * both sides of the on-time ratio.
+ *
+ * They arrive in the week's day rows as a completion AND as late, while the
+ * due day that would offset them sits outside the window — so the ratio came
+ * out 0 of 1 and the 40 % component scored a flat zero. Clearing a single old
+ * task dropped a week from 86 to 52, and the summary then told the student
+ * "Due dates keep slipping past". Ignoring the task outscored doing it.
+ *
+ * Excluded from BOTH sides rather than credited as on-time: the miss was
+ * already scored in the week the deadline actually fell, so counting it here
+ * is double jeopardy — and calling it on-time would be a lie.
+ */
+export function excludeBacklogClears(
+  counts: { completed: number; late: number },
+  backlogCleared: number,
+): { completed: number; late: number } {
+  return {
+    completed: Math.max(0, counts.completed - backlogCleared),
+    late: Math.max(0, counts.late - backlogCleared),
+  };
+}
+
 /** Fallback daily focus target when the user hasn't picked one but does use
  * the timer — modest on purpose (an hour of tracked focus is a real day). */
 export const DEFAULT_FOCUS_TARGET_PER_DAY = 60;
