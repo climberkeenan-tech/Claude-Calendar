@@ -133,12 +133,18 @@ points at a loopback host.
 
 ```bash
 npm run build && npm start &          # with the local DATABASE_URL from above
-node scripts/verify-ui.mjs            # screenshots land in /tmp/phase12
-node scripts/smoke-flows.mjs          # types into the real UI, checks the DB
-node scripts/smoke-mcp.mjs            # mints a token, drives the MCP protocol
-node scripts/smoke-import.mjs         # approve + undo a seeded syllabus
-node scripts/smoke-reminders.mjs      # reminder jobs survive a re-sync
+npm run verify:runtime                # all six passes, one command
+```
+
+Individually, if you want just one:
+
+```bash
+node scripts/verify-ui.mjs            # every route, light/dark, phone/desktop, axe
+node scripts/smoke-flows.mjs          # quick add, completion, habits, timer, feed
 node scripts/smoke-recurring.mjs      # the three recurring edit scopes
+node scripts/smoke-reminders.mjs      # reminder jobs survive a re-sync
+node scripts/smoke-import.mjs         # syllabus approve and undo
+node scripts/smoke-mcp.mjs            # the MCP protocol surface
 ```
 
 `smoke-flows.mjs` is the one that catches what the other two can't. Unit tests

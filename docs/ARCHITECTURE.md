@@ -158,6 +158,23 @@ window predicates, the kind invariants, per-user isolation, the habit week, and
 the whole subscription path from rows through `getFeedRows` and `buildFeed` to
 a real ICS parser. `npm run test:all` runs both.
 
+### And a third layer, because two are not enough
+
+Neither suite can catch a server action that throws the moment it is invoked.
+Quick add shipped returning 500 on every save — a type re-exported from a
+`"use server"` module survived Next's action transform as a runtime reference —
+and it compiled, type-checked, built clean and passed 284 tests, because
+nothing had ever called it.
+
+`npm run verify:runtime` (see `scripts/`) drives the built app in a real
+browser against a real database and then asks the database whether it agrees:
+every route in light and dark at two widths with axe on each, quick add through
+to the row it creates, the three recurring edit scopes, reminder jobs surviving
+a re-sync, syllabus approve and undo, and the MCP protocol surface. It signs in
+by minting an Auth.js session with the app's own `AUTH_SECRET`, so nothing is
+stubbed, and every script refuses to start against a non-loopback database
+because they all write.
+
 ---
 
 ## 4. Database schema
