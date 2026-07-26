@@ -19,8 +19,14 @@ import { RRule } from "rrule";
  */
 export function sanitizeRrule(raw: string | null): string | null {
   if (!raw) return null;
+  // Accept the full property line as well as the bare body. Models emit
+  // "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR" at least as readily as the body the
+  // prompt asks for, and splitting that on ";" then "=" produced the key
+  // "RRULE:FREQ" — FREQ came back undefined and the entire rule was dropped.
+  // A syllabus import then turned a semester of classes into one meeting.
+  const body = raw.trim().replace(/^RRULE:/i, "");
   const parts = new Map<string, string>();
-  for (const piece of raw.split(";")) {
+  for (const piece of body.split(";")) {
     const [k, v] = piece.split("=").map((s) => s?.trim().toUpperCase());
     if (!k || !v) continue;
     parts.set(k, v);
@@ -53,7 +59,10 @@ export function sanitizeRrule(raw: string | null): string | null {
 
   const until = parts.get("UNTIL");
   if (until !== undefined) {
-    const compact = /^(\d{8})(?:T(\d{6})Z?)?$/.exec(until);
+    // The RFC wants the compact form, but the expanded ISO one
+    // ("2026-12-04T23:59:59Z") is just as common from a model and means
+    // exactly the same instant — normalize rather than reject.
+    const compact = /^(\d{8})(?:T(\d{6})Z?)?$/.exec(until.replace(/[-:]/g, ""));
     if (!compact) return null;
     const [, ymd, hms] = compact;
     const y = Number(ymd.slice(0, 4));

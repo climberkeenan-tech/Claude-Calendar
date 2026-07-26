@@ -65,4 +65,29 @@ describe("sanitizeRrule — bounds must survive (imported classes must END)", ()
       "FREQ=WEEKLY;BYDAY=TU;UNTIL=20251215T235959Z",
     );
   });
+  // A syllabus import is the only place these rules come from a model rather
+  // than from a picker, and the two shapes below were the ones it actually
+  // emitted. Rejecting them turned a semester of classes into one meeting.
+  it("accepts the full RRULE: property line, not just the bare body", () => {
+    expect(sanitizeRrule("RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR")).toBe(
+      "FREQ=WEEKLY;BYDAY=MO,WE,FR",
+    );
+    expect(sanitizeRrule("rrule:FREQ=WEEKLY;BYDAY=TU")).toBe(
+      "FREQ=WEEKLY;BYDAY=TU",
+    );
+    expect(sanitizeRrule("  RRULE:FREQ=DAILY  ")).toBe("FREQ=DAILY");
+    // The prefix is stripped, never treated as a key of its own.
+    expect(sanitizeRrule("RRULE:BYDAY=MO")).toBeNull(); // still needs FREQ
+  });
+
+  it("accepts an expanded ISO UNTIL and normalizes it", () => {
+    expect(
+      sanitizeRrule("RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=2026-12-04T23:59:59Z"),
+    ).toBe("FREQ=WEEKLY;BYDAY=MO;UNTIL=20261204T235959Z");
+    expect(sanitizeRrule("FREQ=WEEKLY;UNTIL=2026-12-04")).toBe(
+      "FREQ=WEEKLY;UNTIL=20261204T235959Z",
+    );
+    // Normalizing punctuation must not smuggle a nonsense date through.
+    expect(sanitizeRrule("FREQ=WEEKLY;UNTIL=2026-13-40T12:00:00Z")).toBeNull();
+  });
 });

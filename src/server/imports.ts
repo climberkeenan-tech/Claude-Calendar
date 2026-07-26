@@ -176,6 +176,16 @@ export async function approveImport(input: unknown): Promise<ApproveResult> {
     if (item.kind === "event" && !item.startLocal) {
       return { error: `"${item.title}" needs a date.` };
     }
+    // The review screen showed a "↻ repeats" chip for this row and the student
+    // approved it on that basis. A rule sanitizeRrule can't store used to be
+    // written as rrule=null with approve still returning ok — one meeting on
+    // the calendar where a semester was promised, and nothing said so. Refuse
+    // instead, while nothing has been written.
+    if (item.kind === "event" && item.rrule && !sanitizeRrule(item.rrule)) {
+      return {
+        error: `"${item.title}" has a repeat rule we can't store. Turn off "repeats" on that row to import it as a single date.`,
+      };
+    }
   }
 
   // Resolve shared context in one pass: categories by name, reminder defaults.
