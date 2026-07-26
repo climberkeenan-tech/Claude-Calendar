@@ -218,7 +218,14 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
       // null deletes the override — editing back to the series value reverts
       // cleanly instead of pinning a stale copy forever.
       title: v.title === event.title ? null : v.title,
-      location: !v.location || v.location === event.location ? null : v.location,
+      // `!v.location` conflated two different intentions: "same as the series"
+      // (drop the override) and "blank this one out" (keep an override that IS
+      // blank). Cleared came out as null, which means inherit, so a single
+      // occurrence's room could never be emptied — it snapped back to the
+      // series value. Both readers use `?? e.location`, so "" survives as an
+      // explicit blank.
+      location:
+        v.location === event.location ? null : (v.location ?? ""),
       startsAt: v.startsAt?.toISOString(),
       endsAt: v.endsAt?.toISOString(),
     });
@@ -299,9 +306,13 @@ export async function editEvent(input: z.infer<typeof editSchema>): Promise<{ er
       userId,
       title: v.title,
       kind: event.kind,
-      categoryId: v.categoryId ?? event.categoryId,
+      // `??` here, not on a value the client always sends: both fields are
+      // .nullable() rather than .optional(), so null means the user CLEARED
+      // them, and falling back to the old value made clearing impossible in
+      // this scope alone. The series and single paths already write v.* as-is.
+      categoryId: v.categoryId,
       courseId: event.courseId,
-      location: v.location ?? event.location,
+      location: v.location,
       startsAt: v.startsAt,
       endsAt: new Date(v.startsAt.getTime() + durationMs),
       allDay: event.allDay,

@@ -10,7 +10,7 @@ import { deleteEvent, editEvent, toggleOccurrence } from "@/server/calendar";
 import { completeEvent } from "@/server/events";
 import { EventDetailsSection } from "./event-details";
 import { RadioChips, type RadioChipOption } from "@/components/ui/radio-chips";
-import { instantFromWallClock, isoDay, timeValue } from "@/lib/time";
+import { instantFromWallClock, isoDay, shiftDay, timeValue } from "@/lib/time";
 
 export type SelectedItem = { item: CalendarItem };
 type Category = { id: string; name: string; color: string };
@@ -138,23 +138,40 @@ function EventForm({
       const instant = instantFromWallClock(date, time || "00:00");
       if (isTask) {
         dueAt = time ? instant : instantFromWallClock(date, "23:59");
+      } else if (item.allDay) {
+        // All-day means local midnight to the NEXT local midnight — never
+        // start + 1440 min. On the two DST days a year the local day is 23 or
+        // 25 hours, so the arithmetic version ends at 23:00 or 01:00 and the
+        // event stops being all-day exactly when the clocks change.
+        startsAt = instantFromWallClock(date, "00:00");
+        endsAt = instantFromWallClock(shiftDay(date, 1), "00:00");
       } else {
         startsAt = instant;
         endsAt = new Date(instant.getTime() + duration * 60000);
       }
     }
-    const result = await editEvent({
-      eventId: item.id,
-      occurrenceDate: item.occurrenceDate,
-      occurrenceStart: item.startsAt,
-      scope: item.recurring ? scope : "series",
-      title,
-      location: location || null,
-      categoryId: categoryId || null,
-      startsAt,
-      endsAt,
-      dueAt,
-    });
+    let result: { error?: string };
+    try {
+      result = await editEvent({
+        eventId: item.id,
+        occurrenceDate: item.occurrenceDate,
+        occurrenceStart: item.startsAt,
+        scope: item.recurring ? scope : "series",
+        title,
+        location: location || null,
+        categoryId: categoryId || null,
+        startsAt,
+        endsAt,
+        dueAt,
+      });
+    } catch {
+      // A thrown action (dropped connection, server error) used to leave the
+      // button reading "Saving…" with nothing else happening, which is the
+      // worst possible answer to "did that save?".
+      setPending(false);
+      setError("Couldn't save that — check your connection and try again.");
+      return;
+    }
     if (result.error) {
       setPending(false);
       setError(result.error);
@@ -180,10 +197,17 @@ function EventForm({
   async function toggleDone() {
     if (pending) return;
     setPending(true);
-    if (item.recurring && item.occurrenceDate) {
-      await toggleOccurrence(item.id, item.occurrenceDate, !item.completed);
-    } else {
-      await completeEvent(item.id, !item.completed);
+    setError(null);
+    try {
+      if (item.recurring && item.occurrenceDate) {
+        await toggleOccurrence(item.id, item.occurrenceDate, !item.completed);
+      } else {
+        await completeEvent(item.id, !item.completed);
+      }
+    } catch {
+      setPending(false);
+      setError("Couldn't update that — check your connection and try again.");
+      return;
     }
     setPending(false);
     router.refresh();
@@ -193,12 +217,22 @@ function EventForm({
   async function remove(delScope: Scope) {
     if (pending) return;
     setPending(true);
-    await deleteEvent({
-      eventId: item.id,
-      occurrenceDate: item.occurrenceDate,
-      occurrenceStart: item.startsAt,
-      scope: delScope,
-    });
+    setError(null);
+    try {
+      await deleteEvent({
+        eventId: item.id,
+        occurrenceDate: item.occurrenceDate,
+        occurrenceStart: item.startsAt,
+        scope: delScope,
+      });
+    } catch {
+      // Closing the dialog here would be worse than the error: it reads as
+      // "deleted" for something still on the calendar.
+      setPending(false);
+      setConfirmDelete(false);
+      setError("Couldn't delete that — check your connection and try again.");
+      return;
+    }
     setPending(false);
     router.refresh();
     onClose();

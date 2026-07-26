@@ -20,12 +20,34 @@ type Category = { id: string; name: string; color: string };
 
 const QuickAddPanel = dynamic(() => import("./quick-add-panel"), {
   ssr: false,
-  loading: () => (
-    <div className="flex flex-col gap-3" aria-busy="true">
-      <div className="h-12 animate-pulse rounded-(--radius-sm) bg-surface-raised" />
-      <p className="text-xs text-ink-faint">Waking up the parser…</p>
-    </div>
-  ),
+  // `loading` is also what renders when the chunk FAILS to arrive — on a flaky
+  // campus connection that is a real outcome, not a theoretical one. Ignoring
+  // the `error` prop left the pulsing skeleton and "Waking up the parser…"
+  // running forever, with no way to tell it had given up and no way to retry
+  // short of reloading the page. Quick-add is the primary way into this app.
+  loading: ({ error, retry }) =>
+    error ? (
+      <div className="flex flex-col gap-3" role="alert">
+        <p className="text-sm text-ink">Quick add didn&rsquo;t finish loading.</p>
+        <p className="text-xs text-ink-muted">
+          Usually a dropped connection. Nothing was lost.
+        </p>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="self-start"
+          onClick={() => retry?.()}
+        >
+          Try again
+        </Button>
+      </div>
+    ) : (
+      <div className="flex flex-col gap-3" aria-busy="true">
+        <div className="h-12 animate-pulse rounded-(--radius-sm) bg-surface-raised" />
+        <p className="text-xs text-ink-faint">Waking up the parser…</p>
+      </div>
+    ),
 });
 
 export function QuickAdd({ categories }: { categories: Category[] }) {
