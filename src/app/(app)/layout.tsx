@@ -21,6 +21,11 @@ export default async function AppLayout({
   const categories = await getCategories(session.userId);
   const bellFeed = await getBellFeed();
 
+  async function signOutAction() {
+    "use server";
+    await signOut({ redirectTo: "/login" });
+  }
+
   return (
     <div className="flex min-h-dvh w-full">
       {/* Seven sidebar links stand between the keyboard and the page on every
@@ -48,12 +53,7 @@ export default async function AppLayout({
         <SidebarNav />
         <div className="mt-auto px-2 text-xs text-ink-faint">
           <p>{session.user?.email}</p>
-          <form
-            action={async () => {
-              "use server";
-              await signOut({ redirectTo: "/login" });
-            }}
-          >
+          <form action={signOutAction}>
             <button
               type="submit"
               className="mt-1 text-ink-muted underline-offset-2 hover:text-ink hover:underline"
@@ -80,7 +80,7 @@ export default async function AppLayout({
         </main>
       </div>
 
-      <MobileTabs />
+      <MobileTabs signOut={signOutAction} />
       <ShortcutsOverlay />
       {/* One global instance — Q works on every page, exactly as the ? overlay
           advertises. */}

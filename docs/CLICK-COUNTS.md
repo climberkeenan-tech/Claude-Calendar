@@ -9,6 +9,13 @@ Typing doesn't count. Picking a value inside a native date/time picker counts
 as one. Keyboard shortcuts are listed separately because they're a *shortcut*,
 not the guaranteed path — every row below is reachable with the mouse alone.
 
+**Counted on a phone too.** The bottom bar carries four tabs plus **More**, so
+Import, Analytics, Settings, and Sign out each cost one extra tap there. Both
+numbers appear wherever they differ. (An earlier version of this table counted
+only the desktop sidebar; the bar showed five of seven links and dropped
+Analytics, Settings, and Sign out entirely, which made three of these rows
+untrue on the device the app is mostly used on.)
+
 ## Daily actions
 
 | Action | Path | Clicks | Keyboard |
@@ -60,21 +67,29 @@ not the guaranteed path — every row below is reachable with the mouse alone.
 
 | Action | Path | Clicks | Clicks (worst case) |
 |---|---|---:|---|
-| Import a syllabus | Import → the drop zone → pick the file → **Add N to calendar** (extraction starts on its own) | **3** | 3 |
-| Undo an import | Import → the import → **Undo import** | **3** | 3 |
-| See analytics | Analytics in the nav | **1** | 1 |
+| Import a syllabus | Import → the drop zone → pick the file → **Add N to calendar** (extraction starts on its own) | **3** | 4 on a phone |
+| Undo an import | Import → the import → **Undo import** | **3** | 4 on a phone |
+| See analytics | Analytics in the nav · phone: **More** → Analytics | **1** | 2 on a phone |
 | Hide the weekly score | **Hide** on the score card | **1** | 1 |
-| Change the study cap or transition buffer | Settings → chip → **Save planning settings** | **3** | 3 |
-| Turn a reminder channel on/off | Settings → the channel toggle | **2** | 2 |
-| Add a course | Settings → Courses → fill → **Add course** | **3** | 3 |
-| Generate a Claude (MCP) token | Settings → **＋ Generate token** | **2** | 2 |
+| Change the study cap or transition buffer | Settings → chip → **Save planning settings** | **3** | 4 on a phone |
+| Turn a reminder channel on/off | Settings → the channel toggle | **2** | 3 on a phone |
+| Add a course | Settings → Courses → fill → **Add course** | **3** | 4 on a phone |
+| Generate a Claude (MCP) token | Settings → **＋ Generate token** | **2** | 3 on a phone |
 | Switch light/dark | the theme button in the header | **1** | 1 |
 | See every shortcut | — | — | `?` |
 
-## Nothing exceeds three
+## Nothing exceeds three on the surface it's built for
 
-Every row lands at 3 or fewer. Two paths sit *at* 3 and are worth watching if
-they ever grow:
+Every daily and calendar row lands at 3 or fewer on both desktop and phone.
+
+The Settings-and-setup rows cost one extra tap on a phone, because those four
+destinations live behind **More**. That is a deliberate trade: four thumb-sized
+tabs beat seven truncated ones, and none of those rows is a daily action —
+changing a study cap or generating a token happens once a semester. The rows
+that *are* daily (capture, complete, plan, triage, calendar) are all ≤3 on
+both.
+
+Two paths sit *at* 3 on desktop and are worth watching if they ever grow:
 
 - **Attach a file / add a note** — 3 because "More details" is collapsed by
   default. That collapse is deliberate: the edit sheet stays a four-field form
@@ -100,3 +115,6 @@ in a text field, so typing "quiz" into a title never flips the calendar view.
 
 Inside the app: **Tab** from the top of any page hits **Skip to content**
 first, which jumps past the seven nav links straight into the page.
+
+On a phone the sidebar isn't rendered at all — the bottom bar plus **More** is
+the whole navigation, and Sign out lives in that sheet.
