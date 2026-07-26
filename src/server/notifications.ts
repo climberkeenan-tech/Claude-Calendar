@@ -156,17 +156,38 @@ export async function snoozeJob(input: z.infer<typeof snoozeSchema>): Promise<vo
   }
 
   await acknowledgeJob(v.jobId);
-  const id = crypto.randomUUID();
-  const qstashMessageId = await scheduleCallback({ jobId: id, phase: "deliver" }, sendAt);
-  await db.insert(notificationJobs).values({
-    id,
-    reminderId: job.reminderId,
-    eventId: job.eventId,
-    occurrenceAt: job.occurrenceAt,
-    sendAt,
-    channel: "push",
-    qstashMessageId,
-  });
+
+  // Snooze on EVERY surface the firing used, and always in-app. Hardcoding
+  // "push" meant a snooze silently evaporated for anyone with push turned off
+  // or no enrolled device — the bell showed nothing and no notification ever
+  // came back.
+  const channels = [...new Set(["in_app", job.channel])];
+
+  for (const channel of channels) {
+    const id = crypto.randomUUID();
+    // Only the real notification channels get an alarm; the in-app row is read
+    // from the bell feed and needs no callback.
+    const qstashMessageId =
+      channel === "in_app"
+        ? null
+        : await scheduleCallback({ jobId: id, phase: "deliver" }, sendAt);
+    await db.insert(notificationJobs).values({
+      id,
+      reminderId: job.reminderId,
+      eventId: job.eventId,
+      occurrenceAt: job.occurrenceAt,
+      sendAt,
+      channel,
+      qstashMessageId,
+      // "deferred", not "pending". A snoozed job's sendAt diverges from the
+      // reminder's canonical offset by design, exactly like a quiet-hours
+      // deferral — and diffJobs already knows never to cancel or duplicate a
+      // deferred job. Left pending, the very next sync (any edit to the event,
+      // or the nightly cron at the latest) saw a job whose sendAt no longer
+      // matched the reminder and cancelled it. Every snooze was quietly undone.
+      status: "deferred",
+    });
+  }
   revalidatePath("/");
 }
 

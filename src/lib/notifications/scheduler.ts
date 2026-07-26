@@ -2,7 +2,7 @@
  * DB side of the notification pipeline: materialize `notification_jobs` from
  * reminder intents, keep QStash alarms in sync, deliver, and sweep.
  */
-import { and, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   events,
@@ -19,6 +19,7 @@ import {
   ENQUEUE_WINDOW_MS,
   LEASE_MS,
   PUSH_FALLBACK_AFTER_MS,
+  STALE_AFTER_MS,
 } from "./policy";
 import { dispatch } from "./channels";
 import { cancelCallback, scheduleCallback } from "./qstash";
@@ -379,6 +380,13 @@ export async function dailyMaintenance(): Promise<{
   // Sweep FIRST: anything that slipped past its send time gets its chance
   // before the re-sync touches the job set. (diffJobs also protects overdue
   // and deferred jobs now — this ordering is belt and braces.)
+  //
+  // Bounded at both ends. Without the lower bound the sweep would deliver
+  // jobs overdue by weeks, contradicting STALE_AFTER_MS: "a job overdue by
+  // more than this is past saving — delivering it would be noise, not a
+  // safety net." Waking someone at 2 AM about a deadline from last Tuesday is
+  // exactly the behaviour that gets notifications turned off for good.
+  const staleFloor = new Date(now.getTime() - STALE_AFTER_MS);
   const overdueFirst = await db
     .select({ id: notificationJobs.id })
     .from(notificationJobs)
@@ -387,6 +395,7 @@ export async function dailyMaintenance(): Promise<{
         and(
           inArray(notificationJobs.status, ["pending", "deferred"]),
           lt(notificationJobs.sendAt, new Date(now.getTime() - 5 * 60 * 1000)),
+          gte(notificationJobs.sendAt, staleFloor),
         ),
         and(
           eq(notificationJobs.status, "sending"),

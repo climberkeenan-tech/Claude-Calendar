@@ -45,13 +45,22 @@ export async function runEscalationForUser(userId: string): Promise<number> {
         status: notificationJobs.status,
         isEscalation: notificationJobs.isEscalation,
         sendAt: notificationJobs.sendAt,
+        reminderId: notificationJobs.reminderId,
+        occurrenceAt: notificationJobs.occurrenceAt,
       })
       .from(notificationJobs)
       .where(eq(notificationJobs.eventId, task.id));
 
-    const ignored = jobs.filter(
-      (j) => j.status === "sent" && j.isEscalation === false,
-    ).length;
+    // Count FIRINGS, not rows. Every reminder fans out to at least two rows
+    // (channelsFor always adds an in_app companion alongside push/email), so
+    // counting rows tripped the threshold after a single ignored reminder —
+    // escalating twice as eagerly as the policy says, which is the opposite of
+    // the gentle default this phase was built around.
+    const ignored = new Set(
+      jobs
+        .filter((j) => j.status === "sent" && j.isEscalation === false)
+        .map((j) => `${j.reminderId}|${j.occurrenceAt.toISOString()}`),
+    ).size;
     if (ignored < IGNORED_THRESHOLD) continue;
 
     const existingEscalations = jobs.filter((j) => j.isEscalation).length;

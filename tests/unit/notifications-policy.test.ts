@@ -3,6 +3,7 @@ import {
   desiredJobs,
   diffJobs,
   quietHoursDeferral,
+  type DesiredJob,
   type EventForJobs,
   type ExistingJob,
   type ReminderIntent,
@@ -202,5 +203,68 @@ describe("quietHoursDeferral", () => {
     const at = new Date("2026-09-01T17:30:00Z"); // 1:30 PM EDT
     expect(quietHoursDeferral(at, midday, TZ)).not.toBeNull();
     expect(quietHoursDeferral(at, { start: null, end: null }, TZ)).toBeNull();
+  });
+});
+
+describe("a snooze survives the next sync", () => {
+  const OCC = new Date("2026-09-18T20:00:00Z");
+  const canonical = (over: Partial<DesiredJob> = {}): DesiredJob => ({
+    reminderId: "r1",
+    occurrenceAt: OCC,
+    sendAt: new Date("2026-09-17T20:00:00Z"), // 1 day before
+    channel: "push",
+    ...over,
+  });
+
+  it("is never cancelled, even though its sendAt no longer matches the reminder", () => {
+    // The user tapped "Tomorrow" on a fired reminder, so a job exists at a
+    // time the reminder's own offset would never produce. Marked pending, the
+    // next sync saw the mismatch and cancelled it — every snooze silently
+    // undone, at the latest by the nightly cron. Marked deferred (which is
+    // what a quiet-hours deferral already uses), it is left alone.
+    const snoozed: ExistingJob = {
+      id: "j-snooze",
+      reminderId: "r1",
+      occurrenceAt: OCC,
+      channel: "push",
+      sendAt: new Date("2026-09-18T13:00:00Z"), // "tomorrow 9 AM"
+      status: "deferred",
+    };
+    const { cancel, create } = diffJobs([canonical()], [snoozed], new Date("2026-09-17T21:00:00Z"));
+    expect(cancel).toHaveLength(0);
+    // …and the original is NOT re-created alongside it. The snooze replaces
+    // that firing; recreating it would ring at the time the user just pushed
+    // away from.
+    expect(create).toHaveLength(0);
+  });
+
+  it("a PENDING job with a drifted sendAt is still cancelled — that part must not change", () => {
+    const drifted: ExistingJob = {
+      id: "j-old",
+      reminderId: "r1",
+      occurrenceAt: OCC,
+      channel: "push",
+      sendAt: new Date("2026-09-16T20:00:00Z"), // stale, 2 days before
+      status: "pending",
+    };
+    const { cancel } = diffJobs([canonical()], [drifted], new Date("2026-09-17T21:00:00Z"));
+    expect(cancel.map((c) => c.id)).toEqual(["j-old"]);
+  });
+
+  it("the in-app companion is protected the same way", () => {
+    const snoozedInApp: ExistingJob = {
+      id: "j-inapp",
+      reminderId: "r1",
+      occurrenceAt: OCC,
+      channel: "in_app",
+      sendAt: new Date("2026-09-18T13:00:00Z"),
+      status: "deferred",
+    };
+    const { cancel } = diffJobs(
+      [canonical(), canonical({ channel: "in_app" })],
+      [snoozedInApp],
+      new Date("2026-09-17T21:00:00Z"),
+    );
+    expect(cancel).toHaveLength(0);
   });
 });
