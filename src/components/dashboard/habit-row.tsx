@@ -44,7 +44,11 @@ export function HabitRow({
 
   return (
     <li className="flex flex-wrap items-center gap-3">
-      <span className="min-w-0 flex-1 truncate text-sm text-ink">{habit.title}</span>
+      {/* A floor on the width, or `flex-1 min-w-0` lets the name shrink to a
+          sliver of its first letter rather than letting the day chips wrap —
+          "Gym" rendered as a single stray glyph in the dashboard card. With a
+          minimum, the row wraps instead, which is what flex-wrap is here for. */}
+      <span className="min-w-24 flex-1 truncate text-sm text-ink">{habit.title}</span>
       <div className="flex items-center gap-1" role="group" aria-label={`${habit.title} days`}>
         {days.map((d) => (
           <button

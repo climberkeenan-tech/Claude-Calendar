@@ -65,7 +65,11 @@ export default async function AppLayout({
       </aside>
 
       {/* Main column */}
-      <div className="flex min-w-0 flex-1 flex-col pb-16 md:pb-0">
+      {/* Bottom padding clears BOTH the phone tab bar and the floating quick-add
+          button. Without the second allowance the button sat on top of the last
+          card on every page — on the dashboard it covered the Recent activity
+          text outright, on desktop as well as on a phone. */}
+      <div className="flex min-w-0 flex-1 flex-col pb-32 md:pb-24">
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-bg/85 px-4 backdrop-blur md:px-8">
           <p className="truncate text-sm text-ink-muted">
             {fmtWeekday(new Date())}
