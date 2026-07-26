@@ -26,6 +26,7 @@ const SCRIPTS = [
   ["smoke-flows.mjs", "quick add, completion, habits, timer, feed"],
   ["smoke-recurring.mjs", "the three recurring edit scopes"],
   ["smoke-reminders.mjs", "reminder jobs survive a re-sync"],
+  ["smoke-plan.mjs", "plan accept, undo, and the replan sweep"],
   ["smoke-import.mjs", "syllabus approve and undo"],
   ["smoke-mcp.mjs", "the MCP protocol surface"],
 ];
