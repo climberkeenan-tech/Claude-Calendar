@@ -1,14 +1,8 @@
 import { redirect } from "next/navigation";
 import { auth, signIn } from "@/lib/auth";
+import { safeReturnPath } from "@/lib/oauth/pkce";
 
 export const metadata = { title: "Sign in" };
-
-/** Only same-origin paths may be returned to — "//evil.com" is a URL, not a
- * path, and would turn sign-in into an open redirect. */
-function safeNext(raw: string | undefined): string {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
-  return raw;
-}
 
 export default async function LoginPage({
   searchParams,
@@ -16,7 +10,7 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string }>;
 }) {
   const { next } = await searchParams;
-  const target = safeNext(next);
+  const target = safeReturnPath(next);
   const session = await auth();
   if (session?.userId) redirect(target);
 

@@ -7,6 +7,7 @@ import {
   randomToken,
   redirectUriMatches,
   redirectWith,
+  safeReturnPath,
   verifyPkce,
 } from "@/lib/oauth/pkce";
 import {
@@ -219,5 +220,46 @@ describe("scope handling", () => {
     expect(normalizeScope("calendar.read calendar.read calendar.write")).toBe(
       "calendar.read calendar.write",
     );
+  });
+});
+
+describe("post-sign-in return path", () => {
+  it("keeps a genuine same-origin path, query and all", () => {
+    expect(safeReturnPath("/settings")).toBe("/settings");
+    expect(safeReturnPath("/oauth/authorize?client_id=abc&state=1")).toBe(
+      "/oauth/authorize?client_id=abc&state=1",
+    );
+  });
+
+  it("rejects a BACKSLASH protocol-relative URL — browsers read \\ as /", () => {
+    // The original guard tested startsWith("//"), which "/\\evil.com" passes
+    // while the browser still navigates to https://evil.com. This is on the
+    // sign-in path the OAuth consent flow uses, so it is worth being exact.
+    expect(safeReturnPath("/\\evil.com")).toBe("/");
+    expect(safeReturnPath("/\\\\evil.com")).toBe("/");
+    expect(safeReturnPath("\\\\evil.com")).toBe("/");
+  });
+
+  it("rejects protocol-relative, absolute, and empty inputs", () => {
+    expect(safeReturnPath("//evil.com")).toBe("/");
+    expect(safeReturnPath("https://evil.com")).toBe("/");
+    expect(safeReturnPath("javascript:alert(1)")).toBe("/");
+    expect(safeReturnPath("")).toBe("/");
+    expect(safeReturnPath(null)).toBe("/");
+    expect(safeReturnPath(undefined)).toBe("/");
+  });
+
+  it("never returns anything that leaves this origin", () => {
+    for (const attempt of [
+      "/\\evil.com",
+      "//evil.com",
+      "/\\/evil.com",
+      "https://evil.com/x",
+      "//user:pass@evil.com",
+      "/\\t//evil.com",
+    ]) {
+      const out = safeReturnPath(attempt);
+      expect(new URL(out, "https://app.invalid").origin).toBe("https://app.invalid");
+    }
   });
 });

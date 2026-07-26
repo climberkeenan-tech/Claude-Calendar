@@ -6,10 +6,24 @@ import { Button } from "@/components/ui/button";
 function applyTheme(next: "light" | "dark") {
   document.documentElement.classList.toggle("dark", next === "dark");
   document.cookie = `theme=${next}; path=/; max-age=31536000; samesite=lax`;
+  // One source of truth for every mounted toggle. /settings renders a second
+  // one in the Appearance card while the header keeps its own, and with
+  // per-instance state the two drifted apart: after using the header toggle,
+  // the settings one showed the wrong icon and its first click was a no-op
+  // that set the theme it was already on.
+  window.dispatchEvent(new CustomEvent("hpos:theme", { detail: next }));
 }
 
 export function ThemeToggle({ initialDark }: { initialDark: boolean }) {
   const [dark, setDark] = React.useState(initialDark);
+
+  React.useEffect(() => {
+    const onTheme = (e: Event) => {
+      setDark((e as CustomEvent<"light" | "dark">).detail === "dark");
+    };
+    window.addEventListener("hpos:theme", onTheme);
+    return () => window.removeEventListener("hpos:theme", onTheme);
+  }, []);
 
   return (
     <Button
@@ -17,8 +31,9 @@ export function ThemeToggle({ initialDark }: { initialDark: boolean }) {
       size="icon"
       aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
       onClick={() => {
-        const next = !dark;
-        setDark(next);
+        // Read the DOM, not local state: it is the only thing that is right
+        // even if this instance mounted after someone else flipped it.
+        const next = !document.documentElement.classList.contains("dark");
         applyTheme(next ? "dark" : "light");
       }}
     >

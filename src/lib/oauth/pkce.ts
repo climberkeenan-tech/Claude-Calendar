@@ -95,3 +95,26 @@ export function redirectWith(
   }
   return url.toString();
 }
+
+/**
+ * A post-sign-in return path. Used by /login?next=… so the OAuth consent flow
+ * can come back to itself.
+ *
+ * Browsers normalise a backslash to a forward slash inside a URL, so
+ * "/\evil.com" is a protocol-relative URL wearing a disguise: a
+ * `startsWith("//")` check waves it through and the browser then navigates
+ * off-site. Only a path that starts with exactly one slash, followed by
+ * something that is neither slash nor backslash, is accepted — and it is
+ * re-parsed against a placeholder origin to confirm it stays there.
+ */
+export function safeReturnPath(raw: string | null | undefined): string {
+  if (!raw || !/^\/[^/\\]/.test(raw)) return "/";
+  const BASE = "https://return-path.invalid";
+  try {
+    const u = new URL(raw, BASE);
+    if (u.origin !== BASE) return "/";
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return "/";
+  }
+}

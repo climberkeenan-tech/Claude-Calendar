@@ -42,6 +42,15 @@ export function ShortcutsOverlay() {
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // `?` is advertised as a toggle, but shortcutsSuspended() sees THIS
+      // overlay's own dialog and swallowed the key that would close it — it
+      // opened and then only Escape got you out. The suspend rule still
+      // applies to every other key and to any other open dialog.
+      if (e.key === "?" && open) {
+        e.preventDefault();
+        setOpen(false);
+        return;
+      }
       if (shortcutsSuspended(e)) return;
       if (e.key === "?") {
         e.preventDefault();
@@ -53,7 +62,7 @@ export function ShortcutsOverlay() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [router]);
+  }, [router, open]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
