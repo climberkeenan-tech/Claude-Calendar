@@ -71,6 +71,22 @@ function reanchor(d: Date): Date {
 }
 
 /**
+ * The end of the local day an instant falls on.
+ *
+ * "Essay due Friday" names a DAY, not a moment, and chrono fills the moment in
+ * with whatever the reference time was — noon for a bare weekday. So the task
+ * was stored as due at 12:00 and the app called it overdue from 12:01 PM, for
+ * the entire afternoon and evening it was actually still due. The dialog's
+ * manual path has always used 23:59 for a dateless deadline; this makes the
+ * typed path agree.
+ */
+function endOfLocalDay(d: Date): Date {
+  const p = (n: number) => String(n).padStart(2, "0");
+  const dayIso = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return instantFromWallClock(dayIso, "23:59");
+}
+
+/**
  * chrono resolves a bare hour to AM: "gym at 5" books 5:00 in the morning,
  * "dinner at 6" books breakfast. For a student, an unqualified 1–7 means the
  * afternoon or evening essentially every time; 8–12 stays as written, because
@@ -123,6 +139,8 @@ export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
   let title = text.trim();
   let startIso: string | null = null;
   let endIso: string | null = null;
+  /** End of the named day — the deadline a date-only task really means. */
+  let dayEndIso: string | null = null;
   let allDay = false;
   let rrule: string | null = null;
   let rruleLabel: string | null = null;
@@ -206,6 +224,7 @@ export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
     } else {
       // Date only — all-day (or a due date for tasks)
       startIso = start.toISOString();
+      dayEndIso = endOfLocalDay(localStart).toISOString();
       allDay = true;
     }
     title = (title.slice(0, r.index) + title.slice(r.index + r.text.length))
@@ -232,7 +251,8 @@ export function parseLocal(text: string, now: Date = new Date()): ParsedDraft {
     kind: isHabit ? "habit" : isTask ? "task" : "event",
     startIso: isTask ? null : startIso,
     endIso: isTask ? null : endIso,
-    dueIso: isTask ? startIso : null,
+    // A named day means the END of that day, not the noon chrono filled in.
+    dueIso: isTask ? (dayEndIso ?? startIso) : null,
     allDay,
     rrule,
     rruleLabel,

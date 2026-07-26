@@ -112,6 +112,11 @@ export default function QuickAddPanel({
         if (id !== reqRef.current) return; // user kept typing
         if (res.ok) {
           const c = (await res.json()) as ClaudeDraft;
+          // Re-check AFTER the body. The guard above only proves the request
+          // was still current when the HEADERS arrived; reading the body is
+          // another await, and a response that went stale in that window
+          // overwrote the draft for text the user had already moved on from.
+          if (id !== reqRef.current) return;
           setDraft((prev) => mergeClaude(text, prev, c));
           setRefined(true);
         }
@@ -140,8 +145,18 @@ export default function QuickAddPanel({
         title: draft.title,
         kind: draft.kind,
         startLocal: start ? toLocalIso(start) : null,
+        // Clamped at BOTH ends. The draft schema caps duration at 1440, and
+        // quick-add has no duration control to recover with, so a range longer
+        // than a day ("conference Mon to Wed") failed the entire capture with
+        // an opaque validation error. A full day is the longest this path can
+        // express; creating something editable beats refusing to create.
         durationMinutes:
-          start && end ? Math.max(5, Math.round((end.getTime() - start.getTime()) / 60000)) : null,
+          start && end
+            ? Math.min(
+                1440,
+                Math.max(5, Math.round((end.getTime() - start.getTime()) / 60000)),
+              )
+            : null,
         dueLocal: due ? toLocalIso(due) : null,
         allDay: draft.allDay,
         rrule: draft.rrule,

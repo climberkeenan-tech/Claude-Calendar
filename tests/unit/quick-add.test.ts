@@ -223,3 +223,49 @@ describe("parseLocal from another timezone", () => {
     expect(time(d.endIso!)).toBe("20:00");
   });
 });
+
+describe("a named day is a day, not the moment chrono filled in", () => {
+  // chrono has to return an instant, so "Friday" comes back at whatever the
+  // reference time-of-day was — noon for a bare weekday. Storing that verbatim
+  // made the app call an essay overdue from 12:01 PM on the day it was due.
+  // The dialog's manual path has always used 23:59; these keep them agreeing.
+  it("a date-only deadline lands at the END of that day", () => {
+    for (const text of [
+      "Essay due Friday",
+      "Lab report due tomorrow",
+      "Problem set due Sep 20",
+      "Reading due next Wednesday",
+    ]) {
+      const d = parseLocal(text, NOW);
+      expect(d.kind).toBe("task");
+      expect(d.allDay).toBe(true);
+      expect(d.dueIso).not.toBeNull();
+      expect(time(d.dueIso!)).toBe("23:59");
+    }
+  });
+
+  it("keeps the day itself — end-of-day must not roll into tomorrow", () => {
+    const friday = parseLocal("Essay due Friday", NOW);
+    expect(day(friday.dueIso!)).toBe("2026-09-18");
+    const tomorrow = parseLocal("Lab report due tomorrow", NOW);
+    expect(day(tomorrow.dueIso!)).toBe("2026-09-15");
+    const dated = parseLocal("Problem set due Sep 20", NOW);
+    expect(day(dated.dueIso!)).toBe("2026-09-20");
+  });
+
+  it("a deadline WITH a stated time keeps that time", () => {
+    const d = parseLocal("Essay due Friday at 5pm", NOW);
+    expect(d.kind).toBe("task");
+    expect(d.allDay).toBe(false);
+    expect(day(d.dueIso!)).toBe("2026-09-18");
+    expect(time(d.dueIso!)).toBe("17:00");
+  });
+
+  it("an AM range end is not dragged into the afternoon", () => {
+    // The PM correction must not fire on "7" when the range opened at 6am —
+    // the same-day-PM candidate has to fall INSIDE the range to be accepted.
+    const d = parseLocal("Flight 6am-7", NOW);
+    expect(time(d.startIso!)).toBe("06:00");
+    expect(time(d.endIso!)).toBe("07:00");
+  });
+});
