@@ -99,6 +99,8 @@ const approveItemSchema = z.object({
   kind: z.enum(["task", "event"]),
   title: z.string().trim().min(1).max(300),
   startLocal: z.string().regex(localStamp).nullable(),
+  /** Last day of an all-day span; nullish means a single day. */
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   durationMinutes: z.number().int().min(5).max(1440).nullable(),
   dueLocal: z.string().regex(localStamp).nullable(),
   allDay: z.boolean(),
@@ -130,12 +132,28 @@ const COURSE_COLORS = [
   "#C7A252", "#5AA6A0", "#BF6E8F", "#8A8F5C",
 ];
 
-/** All-day = local midnight to NEXT local midnight (DST-safe, same math as
- * the quick-add core). */
-function allDayRange(dayIso: string): { startsAt: Date; endsAt: Date } {
-  const nextIso = new Date(
-    new Date(`${dayIso}T12:00:00Z`).getTime() + 24 * 60 * 60 * 1000,
-  )
+/** Longest all-day span an import may create. A break is a week or two; a
+ * model that reads "Spring 2027" as an end date shouldn't blank out a year. */
+const MAX_SPAN_DAYS = 60;
+
+/** All-day = local midnight to the local midnight AFTER the last day
+ * (DST-safe, same math as the quick-add core). `lastDayIso` makes it span:
+ * "Fall Break Oct 12–16" is one five-day block, not a single Monday. */
+function allDayRange(
+  dayIso: string,
+  lastDayIso?: string | null,
+): { startsAt: Date; endsAt: Date } {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startNoon = new Date(`${dayIso}T12:00:00Z`).getTime();
+  const spanDays =
+    lastDayIso && lastDayIso > dayIso
+      ? Math.min(
+          MAX_SPAN_DAYS,
+          Math.round((new Date(`${lastDayIso}T12:00:00Z`).getTime() - startNoon) / dayMs),
+        )
+      : 0;
+  // endsAt is exclusive, so a span runs to the morning after its last day.
+  const nextIso = new Date(startNoon + (spanDays + 1) * dayMs)
     .toISOString()
     .slice(0, 10);
   return {
@@ -241,7 +259,10 @@ export async function approveImport(input: unknown): Promise<ApproveResult> {
     if (item.kind === "task") {
       dueAt = localToInstant(item.dueLocal!);
     } else if (item.allDay) {
-      ({ startsAt, endsAt } = allDayRange(item.startLocal!.slice(0, 10)));
+      ({ startsAt, endsAt } = allDayRange(
+        item.startLocal!.slice(0, 10),
+        item.endDate,
+      ));
       rrule = sanitizeRrule(item.rrule);
     } else {
       startsAt = localToInstant(item.startLocal!);

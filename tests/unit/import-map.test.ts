@@ -157,3 +157,82 @@ describe("minutesBetween", () => {
     expect(minutesBetween("10:00", "10:00")).toBeNull();
   });
 });
+
+describe("a multi-day break stays multi-day", () => {
+  // endDate was only ever consumed by boundRrule, so on a NON-recurring item
+  // it was dropped: "Fall Break Oct 12-16" imported as a single Monday.
+  const holiday: SyllabusItem = {
+    ...base,
+    kind: "holiday",
+    title: "Fall Break",
+    date: "2026-10-12",
+    endDate: "2026-10-16",
+    sourceExcerpt: "Fall Break Oct 12-16",
+  };
+
+  it("carries the last day through to the approve payload", () => {
+    const d = toReviewDraft(holiday, 0, noTerm);
+    expect(d.allDay).toBe(true);
+    expect(d.endDate).toBe("2026-10-16");
+    expect(draftToApproveItem(d)!.endDate).toBe("2026-10-16");
+  });
+
+  it("a single-day holiday still has no span", () => {
+    const d = toReviewDraft({ ...holiday, endDate: null }, 0, noTerm);
+    expect(d.endDate).toBeNull();
+    expect(draftToApproveItem(d)!.endDate).toBeNull();
+  });
+
+  it("on a RECURRING item endDate bounds the rule, not the span", () => {
+    const klass = toReviewDraft(
+      {
+        ...base,
+        kind: "class_session",
+        title: "BIO 110",
+        date: "2026-09-01",
+        endDate: "2026-12-04",
+        startTime: "09:00",
+        endTime: "09:50",
+        rrule: "FREQ=WEEKLY;BYDAY=TU",
+      },
+      0,
+      noTerm,
+    );
+    expect(klass.endDate).toBeNull(); // not a span
+    expect(klass.rrule).toContain("UNTIL=20261204");
+  });
+
+  it("a deadline is a moment, never a span", () => {
+    const task = toReviewDraft({ ...base, endDate: "2026-10-20" }, 0, noTerm);
+    expect(draftToApproveItem(task)!.endDate).toBeNull();
+  });
+});
+
+describe("one odd row can't fail the whole import", () => {
+  it("clamps a sub-5-minute block instead of letting the schema reject it", () => {
+    // approveItemSchema bounds duration to 5..1440 and a schema failure fails
+    // the ENTIRE import with one generic message naming no row — so a
+    // three-minute pop quiz took the whole semester down with it.
+    const quiz = toReviewDraft(
+      {
+        ...base,
+        kind: "exam",
+        title: "Pop quiz",
+        startTime: "10:00",
+        endTime: "10:03",
+      },
+      0,
+      noTerm,
+    );
+    expect(quiz.durationMinutes).toBe(5);
+  });
+
+  it("clamps an absurdly long one too", () => {
+    const marathon = toReviewDraft(
+      { ...base, kind: "lab", title: "Lab", startTime: "00:00", endTime: "23:59" },
+      0,
+      noTerm,
+    );
+    expect(marathon.durationMinutes).toBeLessThanOrEqual(1440);
+  });
+});

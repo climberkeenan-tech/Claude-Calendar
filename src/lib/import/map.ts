@@ -16,6 +16,9 @@ export type ReviewDraft = {
   kind: "task" | "event";
   title: string;
   date: string | null; // YYYY-MM-DD
+  /** Last day of a multi-day all-day span ("Fall Break Oct 12–16"). Only set
+   * for non-recurring items — on a recurring one endDate bounds the rule. */
+  endDate: string | null;
   startTime: string | null; // HH:MM — null on tasks means 23:59 due time
   durationMinutes: number | null;
   allDay: boolean;
@@ -93,10 +96,15 @@ export function toReviewDraft(
 
   let durationMinutes: number | null = null;
   if (kind === "event" && item.startTime) {
-    durationMinutes =
+    const raw =
       (item.endTime ? minutesBetween(item.startTime, item.endTime) : null) ??
       DEFAULT_DURATION[item.kind] ??
       60;
+    // Clamped here rather than rejected downstream. approveItemSchema bounds
+    // duration to 5..1440, and a schema failure fails the ENTIRE import with
+    // one generic message — so a syllabus listing a three-minute pop quiz took
+    // the whole semester down with it, naming no row.
+    durationMinutes = Math.min(1440, Math.max(5, raw));
   }
 
   return {
@@ -107,6 +115,10 @@ export function toReviewDraft(
     kind,
     title: item.title.trim() || "Untitled",
     date: item.date,
+    // On a recurring item endDate bounds the RULE (below); on a one-off it
+    // means the span really runs to that day, which used to be thrown away —
+    // "Fall Break Oct 12–16" imported as a single Monday.
+    endDate: recurring ? null : item.endDate,
     startTime: item.startTime,
     durationMinutes,
     allDay: kind === "event" && (item.kind === "holiday" || !item.startTime),
@@ -126,6 +138,8 @@ export type ApproveItem = {
   kind: "task" | "event";
   title: string;
   startLocal: string | null;
+  /** Last day of an all-day span; null means a single day. */
+  endDate: string | null;
   durationMinutes: number | null;
   dueLocal: string | null;
   allDay: boolean;
@@ -141,6 +155,7 @@ export function draftToApproveItem(d: ReviewDraft): ApproveItem | null {
       kind: "task",
       title: d.title,
       startLocal: null,
+      endDate: null, // a deadline is a moment, not a span
       durationMinutes: null,
       // Untimed deadlines mean "that day" — 23:59 keeps them on the right
       // side of midnight without inventing a fake hour.
@@ -155,6 +170,8 @@ export function draftToApproveItem(d: ReviewDraft): ApproveItem | null {
     kind: "event",
     title: d.title,
     startLocal: `${d.date}T${d.allDay || !d.startTime ? "00:00" : d.startTime}`,
+    // Only an all-day block can span days; a timed one is defined by duration.
+    endDate: d.allDay || !d.startTime ? (d.endDate ?? null) : null,
     durationMinutes: d.allDay ? null : d.durationMinutes,
     dueLocal: null,
     allDay: d.allDay || !d.startTime,

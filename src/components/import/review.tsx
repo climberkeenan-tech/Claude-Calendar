@@ -264,7 +264,25 @@ export function ImportReview({
                   className="h-8 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink focus:border-accent focus:outline-none"
                 />
                 {d.kind === "event" && d.allDay ? (
-                  <span className="text-xs text-ink-faint">all day</span>
+                  d.endDate && d.endDate > (d.date ?? "") ? (
+                    // A span is worth showing: a break that runs Oct 12-16
+                    // used to import as a single Monday with nothing saying so.
+                    <label className="flex items-center gap-1.5 text-xs text-ink-faint">
+                      through
+                      <input
+                        type="date"
+                        aria-label="Last day"
+                        value={d.endDate}
+                        min={d.date ?? undefined}
+                        onChange={(e) =>
+                          patch(d.key, { endDate: e.target.value || null })
+                        }
+                        className="h-8 rounded-(--radius-sm) border border-border-input bg-surface px-2 text-sm text-ink focus:border-accent focus:outline-none"
+                      />
+                    </label>
+                  ) : (
+                    <span className="text-xs text-ink-faint">all day</span>
+                  )
                 ) : (
                   <input
                     type="time"
