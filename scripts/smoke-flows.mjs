@@ -135,6 +135,88 @@ if (await complete.count()) {
   check("completing it writes through", false, "no complete control found");
 }
 
+
+// --- the other server actions -----------------------------------------------
+// Each of these is a distinct action module. The quick-add bug proved that a
+// module can compile, type-check, build and still throw the instant it runs,
+// so every one of them gets invoked at least once.
+
+// habit check-in (toggleOccurrence)
+await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+const habitCell = page.locator('main button[aria-label*="Gym on"]').first();
+if (await habitCell.count()) {
+  const label = await habitCell.getAttribute("aria-label");
+  const iso = label?.match(/\d{4}-\d{2}-\d{2}/)?.[0];
+  await habitCell.click();
+  await page.waitForTimeout(2500);
+  const occ = (await pool.query(
+    `select completed from occurrences o join events e on e.id=o.event_id
+      where e.user_id=$1 and e.title='Gym' and o.occurrence_date=$2`, [userId, iso])).rows[0];
+  check("habit check-in writes through", occ?.completed === true, `${iso} -> ${JSON.stringify(occ)}`);
+} else {
+  check("habit check-in writes through", false, "no habit cell found");
+}
+
+// focus timer (startFocusSession)
+await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+const startFocus = page.locator("main button", { hasText: "Start focusing" }).first();
+if (await startFocus.count()) {
+  await startFocus.click();
+  await page.waitForTimeout(2500);
+  const fs = (await pool.query(
+    "select kind, ended_at from focus_sessions where user_id=$1 order by started_at desc limit 1", [userId])).rows[0];
+  check("focus timer starts a session", Boolean(fs) && fs.ended_at === null, JSON.stringify(fs));
+  const stop = page.locator("main button", { hasText: /Stop|End/i }).first();
+  if (await stop.count()) {
+    await stop.click();
+    await page.waitForTimeout(2500);
+    const done = (await pool.query(
+      "select duration_minutes, ended_at from focus_sessions where user_id=$1 order by started_at desc limit 1", [userId])).rows[0];
+    check("stopping records the minutes", done?.ended_at !== null && done?.duration_minutes >= 1,
+      JSON.stringify(done));
+  } else {
+    check("stopping records the minutes", false, "no stop control");
+  }
+} else {
+  check("focus timer starts a session", false, "no start control");
+}
+
+// planner (getPlanContext — a read-heavy action with lots of query surface)
+const planRes = await page.goto(`${BASE}/plan`, { waitUntil: "networkidle" });
+const planText = await page.locator("main").innerText();
+check("plan page computes a week", planRes?.status() === 200 && planText.length > 40,
+  planText.slice(0, 60).replace(/\n/g, " "));
+
+// event edit (editEvent) via the calendar sheet
+await page.goto(`${BASE}/calendar?view=agenda`, { waitUntil: "networkidle" });
+const chip = page.locator("main").getByText("Study for BIO midterm").first();
+if (await chip.count()) {
+  await chip.click();
+  await page.waitForSelector("[role='dialog']", { timeout: 10000 });
+  const titleInput = page.locator("[role='dialog'] input").first();
+  await titleInput.fill("Study for BIO midterm (revised)");
+  await page.locator("[role='dialog'] button", { hasText: /^Save/ }).first().click();
+  await page.waitForTimeout(2500);
+  const edited = await rowFor("%BIO midterm%");
+  check("editing an event writes through", edited?.title === "Study for BIO midterm (revised)", edited?.title);
+} else {
+  check("editing an event writes through", false, "event chip not found in agenda");
+}
+
+// ICS feed (the whole Phase 11 path, over HTTP). Visiting settings is what
+// mints the token, so this exercises that too.
+await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+const feedRow = (await pool.query("select calendar_feed_token as feed_token from user_settings where user_id=$1", [userId])).rows[0];
+if (feedRow?.feed_token) {
+  const res = await page.request.get(`${BASE}/api/calendar/${feedRow.feed_token}`);
+  const body = await res.text();
+  check("ICS feed serves a calendar", res.status() === 200 && body.startsWith("BEGIN:VCALENDAR"),
+    `${res.status()} ${body.slice(0, 30)}`);
+  check("feed carries the new event", body.includes("BIO midterm"));
+} else {
+  console.log("SKIP  ICS feed — no token minted yet");
+}
+
 check("no uncaught page errors", pageErrors.length === 0, pageErrors.slice(0, 2).join(" | "));
 
 await pool.end();
