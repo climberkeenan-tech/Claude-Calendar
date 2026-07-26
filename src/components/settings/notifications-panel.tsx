@@ -9,7 +9,7 @@ import {
   sendTestNotification,
   updateNotificationSettings,
 } from "@/server/notifications";
-import { offsetLabel } from "@/lib/reminders";
+import { offsetLabel } from "@/lib/reminders/labels";
 import { cn } from "@/lib/utils";
 
 type Settings = {

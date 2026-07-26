@@ -43,7 +43,16 @@ export async function POST(req: Request) {
 
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return error("invalid_client_metadata", "redirect_uris is required.");
+    // Say which field and why. A fixed "redirect_uris is required" was a lie
+    // for every other way this can fail — an over-long URI, too many of them,
+    // a client_name past the cap — and left an integrator with nothing to act
+    // on but a guess.
+    const issue = parsed.error.issues[0];
+    const where = issue?.path.length ? issue.path.join(".") : "request body";
+    return error(
+      "invalid_client_metadata",
+      `${where}: ${issue?.message ?? "invalid client metadata"}`,
+    );
   }
   const v = parsed.data;
 

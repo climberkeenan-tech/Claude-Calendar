@@ -120,6 +120,7 @@ Claude-Calendar/
 │   └── styles/tokens.css        # design tokens (light + dark)
 ├── tests/
 │   ├── unit/                    # vitest — recurrence, scheduler, score, parsers
+│   ├── integration/             # vitest — real Postgres, real queries (see below)
 │   └── e2e/                     # playwright — smoke flows
 ├── .env.example
 ├── drizzle.config.ts
@@ -128,6 +129,34 @@ Claude-Calendar/
 ```
 
 Conventions: pages stay thin; logic lives in `src/lib` (pure, testable) and `src/server` (actions). The MCP server and the UI call the **same** server-action layer, so behavior can never drift between "using the app" and "asking Claude."
+
+### Two test suites, and why there are two
+
+`npm test` is pure logic and runs anywhere with no database. That was once the
+*only* suite, which left a real gap: `neon-http` speaks Neon's HTTP protocol
+rather than the Postgres wire protocol, so it cannot reach a local Postgres, so
+the several thousand lines of query and server-action code could not be
+exercised by anything short of production. Everything green was arithmetic, and
+the SQL underneath it was unverified.
+
+`src/lib/db/client.ts` therefore picks its driver by **hostname**: a loopback
+`DATABASE_URL` gets a plain `pg` connection, anything else gets `neon-http`
+exactly as before. The branch is on the host and not on `NODE_ENV` or a flag,
+because a Neon connection string never points at localhost — production cannot
+take that path by accident. `pg` is a devDependency, loaded lazily, so a
+production install neither ships nor loads it.
+
+`db.batch` is the only atomic unit `neon-http` offers (`db.transaction` throws
+there) and a lot of correctness rests on it, so the local driver's `batch` is a
+real transaction — each statement rendered with `.toSQL()` and replayed on one
+pooled connection between `BEGIN` and `COMMIT`. Local behaviour matches
+production rather than being quietly weaker; there is a test that a failing
+batch rolls its siblings back.
+
+`npm run test:integration` then runs against a scratch database, covering the
+window predicates, the kind invariants, per-user isolation, the habit week, and
+the whole subscription path from rows through `getFeedRows` and `buildFeed` to
+a real ICS parser. `npm run test:all` runs both.
 
 ---
 

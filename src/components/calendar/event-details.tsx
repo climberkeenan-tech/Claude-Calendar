@@ -13,7 +13,7 @@ import {
   updateEventDetails,
   type EventDetails,
 } from "@/server/details";
-import { STANDARD_OFFSETS, offsetLabel } from "@/lib/reminders";
+import { STANDARD_OFFSETS, offsetLabel } from "@/lib/reminders/labels";
 import { AttachmentsSection } from "@/components/calendar/attachments";
 import { cn } from "@/lib/utils";
 

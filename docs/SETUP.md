@@ -84,3 +84,36 @@ calendar — **Reset link** kills every subscription instantly if it ever leaks.
 ---
 
 **Costs after setup:** $0/month for everything except the Claude API key (`ANTHROPIC_API_KEY`), which is pay-per-use — typically a few dollars per semester.
+
+---
+
+## Appendix: running the tests
+
+`npm test` needs nothing but the repo — it's the pure-logic suite (recurrence,
+timezones, the parser, the score, the ICS builder) and runs anywhere.
+
+`npm run test:integration` needs a throwaway Postgres. It exercises the real
+queries against the real schema, which is the half `npm test` deliberately
+can't reach.
+
+```bash
+# any local Postgres will do; nothing here touches your Neon database
+createdb hpos_test
+export INTEGRATION_DATABASE_URL="postgres://localhost:5432/hpos_test"
+
+# apply the migrations
+for f in drizzle/*.sql; do
+  psql "$INTEGRATION_DATABASE_URL" -q -f <(sed 's/--> statement-breakpoint//' "$f")
+done
+
+npm run test:integration     # or: npm run test:all
+```
+
+The suite TRUNCATEs every table between tests, so point it at a scratch
+database and never at anything you care about. It refuses to run rather than
+silently testing nothing if the migrations haven't been applied.
+
+You can also run the whole app against that database — a loopback
+`DATABASE_URL` automatically switches the client onto a plain `pg` driver
+(see ARCHITECTURE.md, "Two test suites"). Google sign-in still applies, so
+add your address to `ALLOWED_EMAILS`.
