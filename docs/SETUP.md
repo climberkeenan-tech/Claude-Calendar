@@ -118,6 +118,11 @@ You can also run the whole app against that database — a loopback
 (see ARCHITECTURE.md, "Two test suites"). Google sign-in still applies, so
 add your address to `ALLOWED_EMAILS`.
 
+Set `AUTH_TRUST_HOST=true` for a local run. Auth.js trusts the host
+automatically on Vercel and nowhere else, and without it every page redirects
+to `/login` with `UntrustedHost` in the server log — which reads like a broken
+session rather than a missing variable. Production on Vercel does not need it.
+
 ### The UI sweep
 
 `scripts/verify-ui.mjs` walks every route in light and dark, at desktop and
@@ -133,7 +138,7 @@ points at a loopback host.
 
 ```bash
 npm run build && npm start &          # with the local DATABASE_URL from above
-npm run verify:runtime                # all six passes, one command
+npm run verify:runtime                # all nine passes, one command
 ```
 
 Individually, if you want just one:
@@ -147,6 +152,7 @@ node scripts/smoke-plan.mjs           # plan accept, undo, replan sweep
 node scripts/smoke-import.mjs         # syllabus approve and undo
 node scripts/smoke-actions.mjs        # every remaining server action
 node scripts/smoke-mcp.mjs            # the MCP protocol surface
+node scripts/smoke-memory.mjs         # what the app remembers, both directions
 ```
 
 `smoke-flows.mjs` is the one that catches what the other two can't. Unit tests

@@ -64,9 +64,13 @@ serves from `.next` and rebuilding underneath it breaks the running process.
 ## Where things are
 
 - `src/lib/**` — pure logic, unit-tested. `src/server/**` — server actions.
-- Shared cores (`src/lib/items/*`, `src/lib/scheduling/*`, `src/lib/analytics/*`)
-  are used by BOTH the UI and the MCP tools, so "using the app" and "asking
-  Claude" can never drift apart. Keep it that way.
+- Shared cores (`src/lib/items/*`, `src/lib/scheduling/*`, `src/lib/analytics/*`,
+  `src/lib/memory/*`) are used by BOTH the UI and the MCP tools, so "using the
+  app" and "asking Claude" can never drift apart. Keep it that way.
+- Memory has two halves. `user_patterns` is DERIVED nightly from behaviour;
+  `memories` is TOLD, and every told row must stay visible and deletable in
+  Settings. A memory the owner can't see or remove isn't a feature, it's a
+  surprise.
 - `scripts/` — dev-only verification tooling. Never imported by the app; every
   script refuses to run against a non-loopback database because they all write.
 - `docs/SETUP.md` — deploying it, and running the checks locally.

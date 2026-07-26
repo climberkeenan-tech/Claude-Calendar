@@ -16,6 +16,13 @@ import {
   getSchedulingPrefs,
   shiftIso,
 } from "@/lib/scheduling/context";
+import { formatContext, gatherContext } from "@/lib/memory/context";
+import {
+  forgetMemory,
+  listMemories,
+  rememberFact,
+  MEMORY_KINDS,
+} from "@/lib/memory/store";
 import { fromFloating, isoDayInTz } from "@/lib/tz";
 import { dayBounds, fmtShortDay, fmtTime, relativeDue } from "@/lib/time";
 import { syncJobsForEvent } from "@/lib/notifications/scheduler";
@@ -326,6 +333,81 @@ const handler = createMcpHandler(
               ? `Patterns: ${JSON.stringify(patterns[0].patterns).slice(0, 800)}`
               : "Patterns: not derived yet (first nightly run pending).",
           ].join("\n"),
+        );
+      },
+    );
+
+    // ---------------------------------------------------------------- memory
+    // The other tools each answer one question, so a conversation only ever
+    // knew what it had thought to ask. These three are the difference between
+    // a calendar you can query and one that knows you.
+
+    server.tool(
+      "get_context",
+      "Read this FIRST in any conversation about the user's schedule, workload, or plans. Returns everything at once: who they are, their classes, today's schedule, the next two weeks of deadlines, what the app has learned about how they actually work, and everything they've asked to be remembered. Cheaper and more accurate than guessing or asking them to repeat themselves.",
+      {},
+      async (_args, { authInfo }) => {
+        const userId = userIdOf(authInfo);
+        return text(formatContext(await gatherContext(userId)));
+      },
+    );
+
+    server.tool(
+      "remember",
+      "Save something durable the user has told you, so it survives this conversation — a standing preference (\"mornings are useless to me\"), a constraint (\"I work Thursdays 4–8\"), or a fact about a class (\"Dr. Reyes drops the lowest quiz\"). Do NOT use this for anything with a date — that belongs on the calendar via add_item. Saying the same thing twice updates it rather than duplicating it.",
+      {
+        text: z.string().min(3).max(500),
+        kind: z.enum(MEMORY_KINDS).optional(),
+        pinned: z
+          .boolean()
+          .optional()
+          .describe("Always include this one, even when the list is long."),
+      },
+      async ({ text: what, kind, pinned }, { authInfo }) => {
+        const userId = requireWrite(authInfo);
+        const r = await rememberFact(userId, {
+          text: what,
+          kind,
+          source: "claude",
+          pinned,
+        });
+        if (!r.ok) return text(`Not saved: ${r.error}`);
+        return text(
+          r.created
+            ? `Remembered: "${what}" — they can see and delete it in Settings.`
+            : `Already knew that; updated it.`,
+        );
+      },
+    );
+
+    server.tool(
+      "forget",
+      "Delete something previously remembered, by id. Use list_memories first to get the id. Only for saved facts — calendar items are not memories.",
+      { id: z.string() },
+      async ({ id }, { authInfo }) => {
+        const userId = requireWrite(authInfo);
+        // Scoped by user inside the core, so a stray id can only ever delete
+        // the caller's own row.
+        await forgetMemory(userId, id);
+        return text("Forgotten.");
+      },
+    );
+
+    server.tool(
+      "list_memories",
+      "Everything currently remembered about the user, with ids for `forget`.",
+      {},
+      async (_args, { authInfo }) => {
+        const userId = userIdOf(authInfo);
+        const rows = await listMemories(userId);
+        if (rows.length === 0) return text("Nothing remembered yet.");
+        return text(
+          rows
+            .map(
+              (m) =>
+                `- [${m.kind}] ${m.text}${m.pinned ? " (pinned)" : ""} [id: ${m.id}]`,
+            )
+            .join("\n"),
         );
       },
     );

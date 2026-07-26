@@ -30,6 +30,7 @@ const SCRIPTS = [
   ["smoke-import.mjs", "syllabus approve and undo"],
   ["smoke-actions.mjs", "every remaining server action, called once"],
   ["smoke-mcp.mjs", "the MCP protocol surface"],
+  ["smoke-memory.mjs", "what the app remembers, written and read from both sides"],
 ];
 
 // Fail fast and clearly if nothing is listening, rather than 30s per script.

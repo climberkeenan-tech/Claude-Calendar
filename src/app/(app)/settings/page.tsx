@@ -8,6 +8,8 @@ import { ClaudeAccess } from "@/components/settings/claude-access";
 import { SchedulingPanel } from "@/components/settings/scheduling-panel";
 import { CalendarFeed } from "@/components/settings/calendar-feed";
 import { ConnectedApps } from "@/components/settings/connected-apps";
+import { MemoryPanel } from "@/components/settings/memory-panel";
+import { listMemoryRows } from "@/server/memory";
 import { listApiTokens } from "@/server/tokens";
 import { getFeedToken } from "@/server/feed";
 import { listConnections } from "@/server/oauth";
@@ -26,13 +28,14 @@ export default async function SettingsPage() {
   const session = await auth();
   const initialDark = (await cookies()).get("theme")?.value === "dark";
   const userId = await requireUserId();
-  const [notifSettings, pushDevices, tokens, schedPrefs, feedToken] =
+  const [notifSettings, pushDevices, tokens, schedPrefs, feedToken, memories] =
     await Promise.all([
       getNotificationSettings(),
       countPushSubscriptions(),
       listApiTokens(),
       getSchedulingPrefs(userId),
       getFeedToken(),
+      listMemoryRows(),
     ]);
   const connections = await listConnections();
   // Everything on this page built from appUrl is meant to be COPIED — the
@@ -98,6 +101,8 @@ export default async function SettingsPage() {
       {notifSettings ? (
         <NotificationsPanel initial={notifSettings} pushDevices={pushDevices} />
       ) : null}
+
+      <MemoryPanel memories={memories} />
 
       <CalendarFeed initialToken={feedToken} appUrl={appUrl} />
 

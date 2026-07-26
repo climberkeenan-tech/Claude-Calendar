@@ -533,3 +533,40 @@ export const oauthTokens = pgTable(
     index("oauth_tokens_expires_idx").on(t.expiresAt),
   ],
 );
+
+/**
+ * Things worth remembering about the owner that no query can derive.
+ *
+ * `user_patterns` already learns from behaviour — when they focus, what they
+ * underestimate. This is the other half: what they've SAID. "Mornings are
+ * useless to me", "Dr. Reyes drops the lowest quiz", "I revise better after
+ * the gym." Claude writes these through the MCP tools; the owner can read and
+ * delete every one of them in Settings, because a memory you can't see or
+ * remove isn't a feature, it's a surprise.
+ */
+export const memories = pgTable(
+  "memories",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** One fact, in the owner's own terms. */
+    text: text("text").notNull(),
+    /** preference | constraint | fact — shapes how it's used, not whether. */
+    kind: text("kind").notNull().default("fact"),
+    /** 'claude' when saved from a conversation, 'user' when typed in Settings. */
+    source: text("source").notNull().default("claude"),
+    /** Pinned memories always go to Claude; the rest are trimmed by recency. */
+    pinned: boolean("pinned").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("memories_user_idx").on(t.userId, t.createdAt),
+    // The same fact told twice is one memory, not two.
+    uniqueIndex("memories_user_text_idx").on(t.userId, t.text),
+  ],
+);
