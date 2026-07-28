@@ -1,6 +1,15 @@
 # Going live — one-time setup (~15 minutes, all free)
 
+> **If you just want the site up, read [GO-LIVE.md](GO-LIVE.md) instead.** It's
+> the same job in plain English, browser-only, with Vercel creating the
+> database for you and no commands to run. This page is the reference version,
+> and it also covers running the checks locally.
+
 The code is production-ready; these are the accounts only you can create. Do them in order. When you're done, the site is live at your own URL with real Google sign-in.
+
+Migrations apply themselves on deploy (`vercel-build` runs them before the
+build), so there is no separate database step on Vercel and nothing to re-run
+when a later update adds a table.
 
 ## 1. Neon (the database) — ~3 min
 
