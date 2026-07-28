@@ -62,22 +62,32 @@ This is the fiddly one. It's what stops anyone but you opening your calendar.
 ## 4 · Paste in the settings (about 1 minute)
 
 1. In Vercel: **Settings** → **Environment Variables**.
-2. There's a box that accepts a whole block at once — paste everything below
-   into it, then fill in the two Google values from step 3.
+2. There's a box that accepts a whole block at once. Paste the block **I sent
+   you in chat** into it, then fill in the two Google values from step 3.
+
+The block looks like this, but with real values where the `...` are:
 
 ```
-AUTH_SECRET=+t8BxU+PpLElPCmE6pFUUMypIm0RCs3/+9aP51gr70c=
+AUTH_SECRET=...
 AUTH_GOOGLE_ID=paste-your-client-id-here
 AUTH_GOOGLE_SECRET=paste-your-client-secret-here
 ALLOWED_EMAILS=climberkeenan@gmail.com
-CRON_SECRET=WqllTtmAtl3wviUFKtdgoE5zTuxpnh4q
-VAPID_PUBLIC_KEY=BL7YmCfBVBIUjBG_Y-PvEzuJhC34sTITUdx7jnPrM2oHoKdMFogePBKL2roI7cvnpHtVbUeJk_-RgJCisf_WnEw
-NEXT_PUBLIC_VAPID_PUBLIC_KEY=BL7YmCfBVBIUjBG_Y-PvEzuJhC34sTITUdx7jnPrM2oHoKdMFogePBKL2roI7cvnpHtVbUeJk_-RgJCisf_WnEw
-VAPID_PRIVATE_KEY=NjxW5U_6OAEpOc7UXU9LD5TT-jbEw_JQRv2gb4uLygI
+CRON_SECRET=...
+VAPID_PUBLIC_KEY=...
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
 ```
 
-`ALLOWED_EMAILS` is the whole security model: only addresses on that list can
-get in, even though the sign-in button is Google's. Leave it as just yours.
+> **Why the real values aren't printed here.** This repository is public —
+> anyone on the internet can read this file. `AUTH_SECRET` is what signs your
+> login cookie, so anyone holding it could mint a cookie that looks like you
+> and walk straight into your calendar. Secrets belong in Vercel's settings
+> screen and nowhere else. If you ever need a fresh set, ask me and I'll
+> generate them.
+
+`ALLOWED_EMAILS` is the rest of the security model: only addresses on that
+list can get in, even though the sign-in button is Google's. Leave it as just
+yours.
 
 3. Go to the **Deployments** tab, click the **⋯** menu on the top deployment,
    and choose **Redeploy**.
