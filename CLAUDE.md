@@ -8,8 +8,17 @@ then `docs/ARCHITECTURE.md`.
 ## Standing rules from the owner
 
 - **This is a real, working site — not a demo.** No fake seeded data, no auth
-  bypasses, no "for illustration" scaffolding. Google sign-in is real, the
-  database is real, the deploy is real.
+  bypasses, no "for illustration" scaffolding. Sign-in is real, the database is
+  real, the deploy is real.
+  - Two real doors, both off unless configured: Google OAuth
+    (`AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET`) and an owner password
+    (`OWNER_PASSWORD_HASH`, scrypt, constant-time compare, see
+    `src/lib/owner-password.ts`). The password exists because a Google client
+    needs a redirect URI you can't know until the site is already deployed,
+    which locked the owner out of his own first deploy. It is a credential,
+    **not** a bypass — but it is weaker than Google (no second factor), so
+    don't quietly make it the default or extend it to more accounts. Unset the
+    variable and the provider is never registered at all.
 - **Reliability over speed. Ease of use over technical impressiveness.**
 - It should feel like an official Claude companion: warm neutrals, terracotta
   accent (`#d97757`), Lora / Inter / JetBrains Mono.

@@ -13,6 +13,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:all": "npm run test && npm run test:integration",
     "verify:runtime": "node scripts/verify-all.mjs",
+    "make-password": "node --experimental-strip-types scripts/make-password.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
