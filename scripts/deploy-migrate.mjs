@@ -23,10 +23,28 @@ if (!url) {
   process.exit(1);
 }
 
+/**
+ * Migrate over the DIRECT connection, not the pooled one.
+ *
+ * Neon's Vercel integration sets DATABASE_URL to a PgBouncer endpoint and
+ * DATABASE_URL_UNPOOLED to the database itself. PgBouncer in transaction mode
+ * doesn't support session-level state — advisory locks, SET, prepared
+ * statements — which is exactly what a migration runner leans on, and Neon's
+ * own guidance is to use the direct connection for schema changes. The app
+ * itself still wants the pooled one at runtime; this override is scoped to
+ * the migration and goes no further.
+ */
+const direct = process.env.DATABASE_URL_UNPOOLED?.trim();
+const migrateEnv = { ...process.env };
+if (direct) {
+  migrateEnv.DATABASE_URL = direct;
+  console.log("Using the direct (unpooled) connection for migrations.");
+}
+
 console.log("Applying database migrations...");
 const migrate = spawnSync("npx", ["drizzle-kit", "migrate"], {
   stdio: "inherit",
-  env: process.env,
+  env: migrateEnv,
 });
 
 if (migrate.status !== 0) {

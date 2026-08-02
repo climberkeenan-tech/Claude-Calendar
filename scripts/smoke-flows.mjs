@@ -28,6 +28,62 @@ const pool = new pg.Pool({ connectionString: DB });
 // neither script may assume the other ran first.
 const userId = await ensureLocalUser(pool);
 await ensureFixtures(pool, userId);
+
+// Clear this script's OWN rows before starting. Without it, a second run reads
+// last run's leftovers — the edit step renames the event, so the next run's
+// "title has no leftover date words" check found "...(revised)" and failed on
+// a perfectly healthy app. A smoke test that only passes once isn't a test.
+await pool.query(
+  "delete from events where user_id=$1 and (title ilike '%BIO midterm%' or title ilike '%Chem lab%')",
+  [userId],
+);
+
+const TZ = "America/New_York";
+
+/**
+ * The instant of `hh:mm` on the next `weekday` strictly after today, in the
+ * profile timezone.
+ *
+ * These expectations used to be hardcoded ISO strings. They were correct the
+ * week they were written and have been wrong every week since — "Friday at
+ * 3pm" means a different day each time you run it, so the test failed while
+ * the app was right. Anything a test compares against a parsed relative date
+ * has to be computed the same way a person would.
+ */
+function nextWeekdayAt(weekday, hh, mm) {
+  const parts = (d) =>
+    Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: TZ, weekday: "short", year: "numeric",
+        month: "2-digit", day: "2-digit",
+      })
+        .formatToParts(d)
+        .map((p) => [p.type, p.value]),
+    );
+  const NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // Walk forward a day at a time from tomorrow — no arithmetic on offsets, so
+  // a DST boundary in between can't shift the answer.
+  for (let i = 1; i <= 7; i++) {
+    const probe = new Date(Date.now() + i * 86_400_000);
+    const p = parts(probe);
+    if (NAMES.indexOf(p.weekday) !== weekday) continue;
+    const wall = `${p.year}-${p.month}-${p.day}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00Z`;
+    // Fake-UTC wall clock -> the real instant, the same two-pass correction
+    // the app's own tz helper uses.
+    let guess = new Date(wall);
+    for (let k = 0; k < 2; k++) {
+      const s = new Intl.DateTimeFormat("en-US", {
+        timeZone: TZ, hour12: false, year: "numeric", month: "2-digit",
+        day: "2-digit", hour: "2-digit", minute: "2-digit",
+      }).formatToParts(guess);
+      const g = (t) => Number(s.find((x) => x.type === t)?.value ?? 0);
+      const asUtc = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"));
+      guess = new Date(guess.getTime() + (new Date(wall).getTime() - asUtc));
+    }
+    return guess;
+  }
+  throw new Error("no such weekday within a week");
+}
 const token = await encode({
   token: { appUserId: userId, sub: userId },
   secret: SECRET,
@@ -82,10 +138,12 @@ async function quickAdd(text) {
   return { preview, stillOpen };
 }
 
+/** Newest first: the row this run just created, not one a previous run left. */
 const rowFor = async (like) =>
   (
     await pool.query(
-      "select title, kind, starts_at, due_at, status, completed_at from events where user_id=$1 and title ilike $2",
+      `select title, kind, starts_at, due_at, status, completed_at from events
+        where user_id=$1 and title ilike $2 order by created_at desc limit 1`,
       [userId, like],
     )
   ).rows[0];
@@ -97,10 +155,11 @@ const evRow = await rowFor("%BIO midterm%");
 check("event reached the database", Boolean(evRow), JSON.stringify(evRow));
 check("title has no leftover date words", evRow?.title === "Study for BIO midterm", evRow?.title);
 check("stored as an event on startsAt", evRow?.kind === "event" && !!evRow?.starts_at);
+const expectedFriday = nextWeekdayAt(5, 15, 0); // Friday 3pm, campus time
 check(
   "3pm local, not 3pm UTC",
-  evRow?.starts_at?.toISOString() === "2026-07-31T19:00:00.000Z",
-  evRow?.starts_at?.toISOString(),
+  evRow?.starts_at?.getTime() === expectedFriday.getTime(),
+  `${evRow?.starts_at?.toISOString()} vs ${expectedFriday.toISOString()}`,
 );
 
 await page.goto(`${BASE}/calendar?view=agenda`, { waitUntil: "networkidle" });
@@ -112,10 +171,11 @@ const taskRow = await rowFor("%Chem lab%");
 check("task reached the database", Boolean(taskRow), JSON.stringify(taskRow));
 check("title has no leftover 'due'", taskRow?.title === "Chem lab writeup", taskRow?.title);
 check("stored as a task on dueAt", taskRow?.kind === "task" && !!taskRow?.due_at);
+const expectedThursday = nextWeekdayAt(4, 23, 59); // Thursday 23:59, campus time
 check(
   "a named day means the END of that day",
-  taskRow?.due_at?.toISOString() === "2026-07-31T03:59:00.000Z", // 23:59 EDT Thu
-  taskRow?.due_at?.toISOString(),
+  taskRow?.due_at?.getTime() === expectedThursday.getTime(),
+  `${taskRow?.due_at?.toISOString()} vs ${expectedThursday.toISOString()}`,
 );
 
 await page.goto(`${BASE}/assignments`, { waitUntil: "networkidle" });
@@ -147,12 +207,20 @@ const habitCell = page.locator('main button[aria-label*="Gym on"]').first();
 if (await habitCell.count()) {
   const label = await habitCell.getAttribute("aria-label");
   const iso = label?.match(/\d{4}-\d{2}-\d{2}/)?.[0];
+  const readOcc = async () =>
+    (await pool.query(
+      `select completed from occurrences o join events e on e.id=o.event_id
+        where e.user_id=$1 and e.title='Gym' and o.occurrence_date=$2`, [userId, iso])).rows[0];
+
+  // It's a TOGGLE, so assert it flipped rather than that it became true. The
+  // old check demanded true and therefore passed on the first run of the day
+  // and failed on the second, having correctly un-checked the box.
+  const before = (await readOcc())?.completed === true;
   await habitCell.click();
   await page.waitForTimeout(2500);
-  const occ = (await pool.query(
-    `select completed from occurrences o join events e on e.id=o.event_id
-      where e.user_id=$1 and e.title='Gym' and o.occurrence_date=$2`, [userId, iso])).rows[0];
-  check("habit check-in writes through", occ?.completed === true, `${iso} -> ${JSON.stringify(occ)}`);
+  const after = (await readOcc())?.completed === true;
+  check("habit check-in writes through", after === !before,
+    `${iso}: ${before} -> ${after}`);
 } else {
   check("habit check-in writes through", false, "no habit cell found");
 }

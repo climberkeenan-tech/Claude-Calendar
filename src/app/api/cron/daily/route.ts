@@ -8,7 +8,11 @@ import { rollupUser } from "@/lib/analytics/rollup";
 import { expireInsights, runInsightsForUser } from "@/lib/ai/insights";
 import { pruneOauth } from "@/lib/oauth/store";
 
-export const maxDuration = 300;
+/** 60, not 300: Vercel's Hobby plan refuses to BUILD a function asking for
+ * more, so a larger number here doesn't make the job slower — it makes the
+ * whole deploy fail with a message about plan limits. One person's nightly
+ * rollup finishes in seconds. On Pro this can go up to 300. */
+export const maxDuration = 60;
 
 /**
  * Daily maintenance (Vercel cron — Hobby fires this once a day at an

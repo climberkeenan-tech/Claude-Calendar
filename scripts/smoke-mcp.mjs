@@ -108,6 +108,10 @@ for (const [name, args] of callable) {
 
 // A write, then confirm it in the database.
 if (tools.some((t) => t.name === "add_item")) {
+  // Clear the row a previous run left, or "exactly one" is false the second
+  // time round and the script fails on a healthy app.
+  await pool.query("delete from events where user_id=$1 and title='MCP smoke task'", [userId]);
+
   const r = await rpc("tools/call", {
     name: "add_item",
     arguments: { title: "MCP smoke task", kind: "task", dueLocal: "2026-08-05T23:59" },
@@ -118,7 +122,9 @@ if (tools.some((t) => t.name === "add_item")) {
     "select title, kind, due_at from events where user_id=$1 and title='MCP smoke task'",
     [userId],
   );
-  check("add_item reached the database", rows.length === 1, JSON.stringify(rows[0]));
+  check("add_item reached the database", rows.length === 1,
+    `${rows.length} row(s): ${JSON.stringify(rows[0])}`);
+  await pool.query("delete from events where user_id=$1 and title='MCP smoke task'", [userId]);
 }
 
 await pool.end();

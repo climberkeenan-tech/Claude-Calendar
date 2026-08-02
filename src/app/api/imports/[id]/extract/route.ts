@@ -7,7 +7,9 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { extractSyllabus } from "@/lib/ai/syllabus";
 
-export const maxDuration = 300;
+/** 60 is the Hobby-plan ceiling; asking for more fails the build rather than
+ * buying more time. Enough for one syllabus. Raise to 300 on Pro. */
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 export async function POST(
