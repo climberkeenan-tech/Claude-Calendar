@@ -56,9 +56,12 @@ describe("verifyPassword", () => {
   });
 
   it("rejects a near miss", () => {
-    expect(verifyPassword(PASSWORD + " ", HASH)).toBe(false);
+    // Note surrounding whitespace is NOT a near miss any more — it's trimmed
+    // on purpose, see the paste test below. Everything else still has to fail.
     expect(verifyPassword(PASSWORD.toUpperCase(), HASH)).toBe(false);
     expect(verifyPassword(PASSWORD.slice(0, -1), HASH)).toBe(false);
+    expect(verifyPassword(PASSWORD.replace(/ /g, ""), HASH)).toBe(false);
+    expect(verifyPassword(PASSWORD.replace("battery", "batteries"), HASH)).toBe(false);
   });
 
   it("rejects the empty password even against a hash of the empty password", () => {
@@ -96,6 +99,47 @@ describe("verifyPassword", () => {
     const start = Date.now();
     expect(verifyPassword(PASSWORD, "scrypt:1073741824:8:1:aabb:ccdd")).toBe(false);
     expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  it("survives a password copied with a trailing newline or spaces", () => {
+    // Copying a passphrase out of a chat window drags whitespace with it.
+    // This cost a live round trip: the right password, reported as wrong.
+    expect(verifyPassword(`${PASSWORD}\n`, HASH)).toBe(true);
+    expect(verifyPassword(`  ${PASSWORD}  `, HASH)).toBe(true);
+    expect(verifyPassword(`\t${PASSWORD}\r\n`, HASH)).toBe(true);
+  });
+
+  it("survives a HASH that picked up whitespace on the way into a settings box", () => {
+    // A line break landing mid-hash used to leave a shape that still looked
+    // valid while Buffer.from(hex) silently truncated at the break — so the
+    // form appeared and then rejected the correct password forever.
+    const wrapped = HASH.slice(0, 40) + "\n" + HASH.slice(40);
+    expect(verifyPassword(PASSWORD, wrapped)).toBe(true);
+    expect(verifyPassword(PASSWORD, `  ${HASH}\n`)).toBe(true);
+  });
+
+  it("still verifies a hash that lost a few bytes off the end", () => {
+    // scrypt's output is prefix-extendable, so a hash cut short is a valid
+    // shorter hash rather than a broken one — a paste that dropped some
+    // characters keeps working instead of locking you out. Documented because
+    // it is genuinely surprising, and it is why the floor below matters.
+    const nicked = HASH.slice(0, HASH.length - 60); // still 34 bytes
+    expect(verifyPassword(PASSWORD, nicked)).toBe(true);
+  });
+
+  it("refuses a hash cut below the strength floor", () => {
+    // 32 bytes is the line. Below it we stop calling it a hash at all, so the
+    // page says "set OWNER_PASSWORD_HASH" — something you can act on —
+    // instead of a login box that rejects the right password forever.
+    const gutted = HASH.slice(0, HASH.lastIndexOf(":") + 33);
+    expect(verifyPassword(PASSWORD, gutted)).toBe(false);
+    process.env.OWNER_PASSWORD_HASH = gutted;
+    expect(ownerLoginEnabled()).toBe(false);
+  });
+
+  it("rejects a hash with non-hex characters in it", () => {
+    const corrupted = HASH.replace(/:([0-9a-f]{32}):/, ":zzzz$1:");
+    expect(verifyPassword(PASSWORD, corrupted)).toBe(false);
   });
 
   it("normalizes unicode so the same typed password matches", () => {

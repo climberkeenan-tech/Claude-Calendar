@@ -51,15 +51,24 @@ export function hashPassword(password: string, salt?: Buffer): string {
   return [PREFIX, N, R, P, s.toString("hex"), derived.toString("hex")].join(":");
 }
 
+/** Complete, even-length hex and nothing else. */
+const HEX = /^(?:[0-9a-fA-F]{2})+$/;
+
 /**
- * True only for the right password. Wrong password, malformed hash, missing
- * hash — all false, and all take a comparable amount of time, so nothing here
- * tells an attacker which of those it was.
+ * Pull a stored hash apart, or null if it isn't one.
+ *
+ * Whitespace is stripped from the WHOLE string first, not just the ends. A
+ * hash pasted into a settings box can pick up a line break in the middle, and
+ * `Buffer.from(hex)` stops silently at the first character it doesn't like —
+ * so half a salt still parses, still has the right shape, and rejects the
+ * correct password with no clue why. Validating the hex properly turns that
+ * into "this hash is broken", which is a thing you can act on.
  */
-export function verifyPassword(password: string, stored: string | undefined): boolean {
-  if (!stored) return false;
-  const parts = stored.trim().split(":");
-  if (parts.length !== 6 || parts[0] !== PREFIX) return false;
+function parseHash(stored: string | undefined) {
+  if (!stored) return null;
+  const clean = stored.replace(/\s+/g, "");
+  const parts = clean.split(":");
+  if (parts.length !== 6 || parts[0] !== PREFIX) return null;
 
   const n = Number(parts[1]);
   const r = Number(parts[2]);
@@ -71,22 +80,37 @@ export function verifyPassword(password: string, stored: string | undefined): bo
     !Number.isInteger(r) || r < 1 || r > 32 ||
     !Number.isInteger(p) || p < 1 || p > 16
   ) {
-    return false;
+    return null;
   }
 
-  let salt: Buffer;
-  let expected: Buffer;
-  try {
-    salt = Buffer.from(parts[4], "hex");
-    expected = Buffer.from(parts[5], "hex");
-  } catch {
-    return false;
-  }
-  if (salt.length === 0 || expected.length === 0) return false;
+  if (!HEX.test(parts[4]) || !HEX.test(parts[5])) return null;
+  const salt = Buffer.from(parts[4], "hex");
+  const expected = Buffer.from(parts[5], "hex");
+  // A truncated paste is the failure this is really guarding: it would still
+  // be valid hex, just short, and short-but-valid is indistinguishable from
+  // "wrong password" at the comparison.
+  if (salt.length < 8 || expected.length < 32) return null;
+
+  return { n, r, p, salt, expected };
+}
+
+/**
+ * True only for the right password. Wrong password, malformed hash, missing
+ * hash — all false, and all take a comparable amount of time, so nothing here
+ * tells an attacker which of those it was.
+ */
+export function verifyPassword(password: string, stored: string | undefined): boolean {
+  const parsed = parseHash(stored);
+  if (!parsed) return false;
+  const { n, r, p, salt, expected } = parsed;
 
   let derived: Buffer;
   try {
-    derived = scryptSync(password.normalize("NFKC"), salt, expected.length, {
+    // Trim the typed password. Nobody's passphrase begins or ends with a
+    // space, and copying one out of a chat window or a password manager
+    // routinely drags a trailing newline along with it — which produced a
+    // flat "that password didn't match" for a password that was correct.
+    derived = scryptSync(password.trim().normalize("NFKC"), salt, expected.length, {
       N: n,
       r,
       p,
@@ -102,12 +126,17 @@ export function verifyPassword(password: string, stored: string | undefined): bo
   return timingSafeEqual(derived, expected);
 }
 
-/** Whether the password door exists on this install at all. */
+/**
+ * Whether the password door exists on this install at all.
+ *
+ * Deliberately the SAME parse the check uses. When these two disagree — a
+ * hash good enough to show the form but not good enough to match anything —
+ * you get a login box that rejects the correct password forever, and the
+ * screen blames you rather than the setting. Now a broken hash means no form
+ * and the "set OWNER_PASSWORD_HASH" message instead.
+ */
 export function ownerLoginEnabled(): boolean {
-  const stored = process.env.OWNER_PASSWORD_HASH?.trim();
-  if (!stored) return false;
-  const parts = stored.split(":");
-  return parts.length === 6 && parts[0] === PREFIX;
+  return parseHash(process.env.OWNER_PASSWORD_HASH) !== null;
 }
 
 /**
